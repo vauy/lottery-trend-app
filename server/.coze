@@ -1,0 +1,44 @@
+[project]
+entrypoint = "server.js"
+requires = [ "nodejs-24" ]
+project_type = "app"
+template = "expo"
+version = "0.1.9"
+appliedPatches = [ ]
+project_id = "7688357722231947306"
+app_id = "7688425382495682579"
+project_name = "lottery-trend-app"
+
+[dev]
+build = [ "bash", ".cozeproj/scripts/dev_build.sh" ]
+build_win = [
+  "powershell.exe",
+  "-NoProfile",
+  "-ExecutionPolicy",
+  "Bypass",
+  "-File",
+  ".cozeproj/scripts/dev_build.ps1"
+]
+run = [ "bash", ".cozeproj/scripts/dev_run.sh" ]
+run_win = [
+  "powershell.exe",
+  "-NoProfile",
+  "-ExecutionPolicy",
+  "Bypass",
+  "-File",
+  ".cozeproj/scripts/dev_run.ps1"
+]
+validate = [ "bash", ".cozeproj/scripts/validate.sh" ]
+validate_win = [
+  "powershell.exe",
+  "-NoProfile",
+  "-ExecutionPolicy",
+  "Bypass",
+  "-File",
+  ".cozeproj/scripts/validate.ps1"
+]
+
+[deploy]
+build = [ "bash", ".cozeproj/scripts/prod_build.sh" ]
+run = [ "bash", ".cozeproj/scripts/prod_run.sh" ]
+build_app_dir = "./client"

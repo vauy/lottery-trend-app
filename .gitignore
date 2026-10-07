@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.expo/
+.expo-shared/
+.eslintcache
+expo/expo-env.d.ts
+expo-env.d.ts
+.DS_Store
+logs/
+*.tsbuildinfo
+node-compile-cache/
+.codegraph/
+.cozeproj/reduction
+.preview

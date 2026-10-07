@@ -1,0 +1,157 @@
+/**
+ * 遗漏K线图 —— ECharts WebView + custom 系列。
+ * 石头剪刀布爬楼梯 + 循环降档。
+ */
+import React, { useMemo } from 'react';
+import { View } from 'react-native';
+import { WebView } from 'react-native-webview';
+import { ECHARTS_SOURCE } from '@/lib/echartsSource';
+import type { TargetPoint } from '@/lib/lottery/targets';
+
+const RED = '#e5484d';
+const CYAN = '#22d3ee';
+
+const BAR_W = 1.5;
+const MAX_SHOW = 300;
+
+type KBar = { x: number; o: number; c: number; isRed: boolean };
+
+function calcDelta(prevMiss: number, theoryMiss: number): { delta: number; isRed: boolean } {
+  if (theoryMiss <= 0) return { delta: 1, isRed: true };
+  if (prevMiss <= theoryMiss) return { delta: 1, isRed: true };
+  const level = Math.ceil(prevMiss / theoryMiss) - 1;
+  const mult = ((level - 1) % 3) + 1;
+  return { delta: -mult, isRed: false };
+}
+
+export function EChartsOmissionKChart({
+  series,
+  height = 300,
+  width = 350,
+  theoryMiss = 0,
+}: {
+  series: TargetPoint[];
+  height?: number;
+  width?: number;
+  theoryMiss?: number;
+}) {
+  const html = useMemo(() => {
+    const bars: KBar[] = [];
+    let score = 0;
+    for (let i = 0; i < series.length; i += 1) {
+      if (series[i].hit === 1) {
+        const prevMiss = i === 0 ? 0 : series[i - 1].omission;
+        const { delta, isRed } = calcDelta(prevMiss, theoryMiss);
+        bars.push({ x: i, o: score, c: score + delta, isRed });
+        score = score + delta;
+      }
+    }
+
+    const showBars = bars.length > MAX_SHOW ? bars.slice(-MAX_SHOW) : bars;
+    const n = showBars.length;
+
+    if (n === 0) {
+      return '<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:12px;font-family:sans-serif">无开出记录</body></html>';
+    }
+
+    const allY: number[] = [];
+    for (const b of showBars) allY.push(b.o, b.c);
+    const yMin = Math.min(0, ...allY);
+    const yMax = Math.max(0, ...allY);
+    const range = yMax - yMin || 1;
+
+    const xLabels = showBars.map((b) => series[b.x].issue.slice(-3));
+    const dataWithColor = showBars.map((b) => ({
+      value: [b.x - showBars[0].x, b.o, b.c],
+      itemStyle: { color: b.isRed ? RED : CYAN },
+    }));
+    // 修正 x 从 0 开始
+    const dataFinal = showBars.map((b, i) => ({
+      value: [i, b.o, b.c],
+      itemStyle: { color: b.isRed ? RED : CYAN },
+    }));
+
+    const labelStep = Math.max(1, Math.floor(n / 15));
+    const xAxisLabels = xLabels.map((l, i) => (i % labelStep === 0 ? l : ''));
+
+    const renderItemFn = `function(params, api) {
+      var idx = api.value(0);
+      var o = api.value(1);
+      var c = api.value(2);
+      var x = api.coord([idx, 0])[0];
+      var yO = api.coord([idx, o])[1];
+      var yC = api.coord([idx, c])[1];
+      var halfW = ${BAR_W} / 2;
+      var top = Math.min(yO, yC);
+      var h = Math.max(1.5, Math.abs(yC - yO));
+      var color = api.visual('color');
+      return {
+        type: 'rect',
+        shape: { x: x - halfW, y: top, width: ${BAR_W}, height: h },
+        style: { fill: color }
+      };
+    }`;
+
+    const optionStr = `{
+      animation: false,
+      backgroundColor: '#ffffff',
+      grid: { left: 36, right: 16, top: 14, bottom: 22 },
+      xAxis: {
+        type: 'category',
+        data: ${JSON.stringify(xAxisLabels)},
+        axisTick: { show: false },
+        axisLine: { lineStyle: { color: 'rgba(140,140,150,0.35)' } },
+        axisLabel: { fontSize: 8, color: '#8a8f98', interval: 0 }
+      },
+      yAxis: {
+        type: 'value',
+        min: ${Math.floor(yMin - range * 0.08)},
+        max: ${Math.ceil(yMax + range * 0.08)},
+        splitLine: { lineStyle: { color: 'rgba(140,140,150,0.15)' } },
+        axisLabel: { fontSize: 8, color: '#8a8f98' }
+      },
+      series: [
+        {
+          type: 'custom',
+          renderItem: ${renderItemFn},
+          data: ${JSON.stringify(dataFinal)},
+          z: 5
+        }
+      ]
+    }`;
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <script>${ECHARTS_SOURCE}</script>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+    #chart { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="chart"></div>
+  <script>
+    var chart = echarts.init(document.getElementById('chart'));
+    chart.setOption(${optionStr});
+    window.addEventListener('resize', function() { chart.resize(); });
+  </script>
+</body>
+</html>`;
+  }, [series, theoryMiss, height, width]);
+
+  return (
+    <View style={{ width, height }}>
+      <WebView
+        source={{ html }}
+        style={{ width, height, backgroundColor: 'transparent' }}
+        originWhitelist={['*']}
+        javaScriptEnabled
+        domStorageEnabled
+        scrollEnabled={false}
+      />
+    </View>
+  );
+}
