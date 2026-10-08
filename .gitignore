@@ -13,3 +13,8 @@ node-compile-cache/
 .codegraph/
 .cozeproj/reduction
 .preview
+
+# 补：匹配 node_modules 文件（不带斜杠）
+node_modules
+**/node_modules
+**/node_modules/
