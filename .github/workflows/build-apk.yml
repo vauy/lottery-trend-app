@@ -45,13 +45,13 @@ jobs:
         working-directory: client
         run: npx expo prebuild --platform android --clean
 
-      - name: Build APK (debug)
+      - name: Build APK (release)
         working-directory: client/android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: chmod +x gradlew && ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: client/android/app/build/outputs/apk/debug/app-debug.apk
+          name: app-release
+          path: client/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
