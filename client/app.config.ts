@@ -12,7 +12,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     "version": "1.0.0",
     "orientation": "landscape",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "vauylottery",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
