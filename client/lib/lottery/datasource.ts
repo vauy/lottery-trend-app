@@ -16,6 +16,8 @@ export type DataSource = 'network' | 'cache' | 'seed';
 
 export interface HistoryResult {
   records: DrawRecord[];
+  /** 全量历史（未截断） */
+  allRecords: DrawRecord[];
   source: DataSource;
   refreshedAt?: string;
 }
@@ -146,26 +148,26 @@ export async function loadHistory(
   if (!opts.forceRefresh && cached) {
     const age = Date.now() - cached.ts;
     if (age < CACHE_TTL_MS) {
-      return { records: cached.records.slice(-count), source: 'cache' };
+      return { records: cached.records.slice(-count), allRecords: cached.records, source: 'cache' };
     }
     // 缓存过期，后台刷新，先用旧的
     void refreshInBackground(gameId);
-    return { records: cached.records.slice(-count), source: 'cache' };
+    return { records: cached.records.slice(-count), allRecords: cached.records, source: 'cache' };
   }
 
   // 强制刷新 或 无缓存
   try {
     const full = await fetchFullHistory(gameId);
     await writeCache(gameId, full);
-    return { records: full.slice(-count), source: 'network' };
+    return { records: full.slice(-count), allRecords: full, source: 'network' };
   } catch {
     // 有旧缓存用旧缓存
     if (cached) {
-      return { records: cached.records.slice(-count), source: 'cache' };
+      return { records: cached.records.slice(-count), allRecords: cached.records, source: 'cache' };
     }
     // 完全兜底种子
     const seed = getSeed();
-    return { records: seed.slice(-count), source: 'seed' };
+    return { records: seed.slice(-count), allRecords: seed, source: 'seed' };
   }
 }
 

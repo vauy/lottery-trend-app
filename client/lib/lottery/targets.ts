@@ -5,9 +5,18 @@ import type { DrawRecord } from './types';
 
 // ==================== 基础类型 ====================
 
-export type Position = 'any' | 'bai' | 'shi' | 'ge';
+export type Position = 'any' | 'wan' | 'qian' | 'bai' | 'shi' | 'ge';
 
+/** 从右往左数：ge=1, shi=2, bai=3, qian=4, wan=5；返回从左往右的索引 */
+export function posIndex(pos: Exclude<Position, 'any'>, digitCount: number): number {
+  const fromRight = pos === 'ge' ? 1 : pos === 'shi' ? 2 : pos === 'bai' ? 3 : pos === 'qian' ? 4 : 5;
+  return digitCount - fromRight;
+}
+
+/** 兼容旧代码：3 位时的固定映射 */
 export const POS_IDX: Record<Exclude<Position, 'any'>, number> = {
+  wan: -2,
+  qian: -1,
   bai: 0,
   shi: 1,
   ge: 2,
@@ -15,6 +24,8 @@ export const POS_IDX: Record<Exclude<Position, 'any'>, number> = {
 
 export const POS_LABEL: Record<Position, string> = {
   any: '不定位',
+  wan: '万位',
+  qian: '千位',
   bai: '百位',
   shi: '十位',
   ge: '个位',
@@ -114,6 +125,8 @@ export type CalcAttrKey =
   | 'baiAmp'
   | 'shiAmp'
   | 'geAmp'
+  | 'qianAmp'    // 千位振幅 (0-9)
+  | 'wanAmp'     // 万位振幅 (0-9)
   | 'sumTailAmp'  // 合值振幅 (0-9)
   | 'front2Sum'  // 前二和值 = 百 + 十 (0-18)
   | 'back2Sum';  // 后二和值 = 十 + 个 (0-18)
@@ -129,6 +142,8 @@ export const CALC_ATTRS: Record<CalcAttrKey, { label: string; min: number; max: 
   baiAmp: { label: '百位振幅', min: 0, max: 9 },
   shiAmp: { label: '十位振幅', min: 0, max: 9 },
   geAmp: { label: '个位振幅', min: 0, max: 9 },
+  qianAmp: { label: '千位振幅', min: 0, max: 9 },
+  wanAmp: { label: '万位振幅', min: 0, max: 9 },
   sumTailAmp: { label: '合值振幅', min: 0, max: 9 },
   front2Sum: { label: '前二和值', min: 0, max: 18 },
   back2Sum: { label: '后二和值', min: 0, max: 18 },
@@ -145,46 +160,57 @@ export type Target =
 // ==================== 命中判定 ====================
 
 function calcAttrValue(nums: number[], key: CalcAttrKey, prevNums?: number[]): number {
-  const [a, b, c] = nums;
+  const sum = (arr: number[]) => arr.reduce((s, v) => s + v, 0);
+  const span = (arr: number[]) => Math.max(...arr) - Math.min(...arr);
   switch (key) {
     case 'sum':
-      return a + b + c;
+      return sum(nums);
     case 'sumTail':
-      return (a + b + c) % 10;
+      return sum(nums) % 10;
     case 'span':
-      return Math.max(a, b, c) - Math.min(a, b, c);
-    case 'pairSumMax':
-      return Math.max((a + b) % 10, (a + c) % 10, (b + c) % 10);
-    case 'pairDiffMax':
-      return Math.max(Math.abs(a - b), Math.abs(a - c), Math.abs(b - c));
-    case 'sumAmp': {
-      if (!prevNums) return 0;
-      const s1 = prevNums[0] + prevNums[1] + prevNums[2];
-      const s2 = a + b + c;
-      return Math.abs(s2 - s1);
+      return span(nums);
+    case 'pairSumMax': {
+      let mx = 0;
+      for (let i = 0; i < nums.length; i += 1)
+        for (let j = i + 1; j < nums.length; j += 1)
+          mx = Math.max(mx, (nums[i] + nums[j]) % 10);
+      return mx;
     }
-    case 'spanAmp': {
-      if (!prevNums) return 0;
-      const sp1 = Math.max(...prevNums) - Math.min(...prevNums);
-      const sp2 = Math.max(a, b, c) - Math.min(a, b, c);
-      return Math.abs(sp2 - sp1);
+    case 'pairDiffMax': {
+      let mx = 0;
+      for (let i = 0; i < nums.length; i += 1)
+        for (let j = i + 1; j < nums.length; j += 1)
+          mx = Math.max(mx, Math.abs(nums[i] - nums[j]));
+      return mx;
     }
+    case 'sumAmp':
+      if (!prevNums) return 0;
+      return Math.abs(sum(nums) - sum(prevNums));
+    case 'spanAmp':
+      if (!prevNums) return 0;
+      return Math.abs(span(nums) - span(prevNums));
     case 'baiAmp':
-      return prevNums ? Math.abs(a - prevNums[0]) : 0;
+      if (!prevNums || nums.length < 3) return 0;
+      return Math.abs(nums[posIndex('bai', nums.length)] - prevNums[posIndex('bai', prevNums.length)]);
     case 'shiAmp':
-      return prevNums ? Math.abs(b - prevNums[1]) : 0;
+      if (!prevNums || nums.length < 2) return 0;
+      return Math.abs(nums[posIndex('shi', nums.length)] - prevNums[posIndex('shi', prevNums.length)]);
     case 'geAmp':
-      return prevNums ? Math.abs(c - prevNums[2]) : 0;
-    case 'sumTailAmp': {
+      if (!prevNums || nums.length < 1) return 0;
+      return Math.abs(nums[posIndex('ge', nums.length)] - prevNums[posIndex('ge', prevNums.length)]);
+    case 'qianAmp':
+      if (!prevNums || nums.length < 4) return 0;
+      return Math.abs(nums[posIndex('qian', nums.length)] - prevNums[posIndex('qian', prevNums.length)]);
+    case 'wanAmp':
+      if (!prevNums || nums.length < 5) return 0;
+      return Math.abs(nums[posIndex('wan', nums.length)] - prevNums[posIndex('wan', prevNums.length)]);
+    case 'sumTailAmp':
       if (!prevNums) return 0;
-      const s1 = (prevNums[0] + prevNums[1] + prevNums[2]) % 10;
-      const s2 = (a + b + c) % 10;
-      return Math.abs(s2 - s1);
-    }
+      return Math.abs(sum(nums) % 10 - sum(prevNums) % 10);
     case 'front2Sum':
-      return a + b;
+      return nums[0] + nums[1];
     case 'back2Sum':
-      return b + c;
+      return nums[nums.length - 2] + nums[nums.length - 1];
   }
 }
 
@@ -194,20 +220,20 @@ export function isHit(record: DrawRecord, target: Target, prevRecord?: DrawRecor
   switch (target.kind) {
     case 'digit': {
       if (target.pos === 'any') return nums.includes(target.digit);
-      return nums[POS_IDX[target.pos]] === target.digit;
+      return nums[posIndex(target.pos, nums.length)] === target.digit;
     }
     case 'setAttr': {
       const set = SET_ATTRS[target.attrKey].values[target.attrValue];
       if (!set) return false;
       if (target.pos === 'any') return nums.some((n) => set.has(n));
-      return set.has(nums[POS_IDX[target.pos]]);
+      return set.has(nums[posIndex(target.pos, nums.length)]);
     }
     case 'calcAttr': {
       return calcAttrValue(nums, target.calcKey, prevNums) === target.value;
     }
     case 'set': {
       // 直选集合：精确匹配（123 与 321 是不同注）
-      const code = `${nums[0]}${nums[1]}${nums[2]}`;
+      const code = nums.join('');
       return target.codes.has(code);
     }
   }

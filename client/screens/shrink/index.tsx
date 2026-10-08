@@ -41,7 +41,6 @@ export default function ShrinkScreen() {
   const [showZhixuan, setShowZhixuan] = useState(true);
   const [showZuxuan, setShowZuxuan] = useState(true);
   const [filterInput, setFilterInput] = useState('');
-
   const rawResult = useMemo(() => {
     if (dan.length === 0) {
       const zhixuan: string[] = [];

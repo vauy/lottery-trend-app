@@ -45,27 +45,8 @@ const TABS: { id: TabId; label: string }[] = [
 
 const POS_OPTIONS: Position[] = ['any', 'bai', 'shi', 'ge'];
 const POS_LABEL_MAP: Record<Position, string> = {
-  any: '不定位', bai: '百位', shi: '十位', ge: '个位',
+  any: '不定位', wan: '万位', qian: '千位', bai: '百位', shi: '十位', ge: '个位',
 };
-const HEJI_KEYS = [
-  { id: 'sum', label: '和值', min: 0, max: 27 },
-  { id: 'sumTail', label: '合值', min: 0, max: 9 },
-  { id: 'span', label: '跨度', min: 0, max: 9 },
-  { id: 'pairSumMax', label: '二码合最大', min: 0, max: 9 },
-  { id: 'pairDiffMax', label: '二码差最大', min: 0, max: 9 },
-  { id: 'front2Sum', label: '前二和值', min: 0, max: 18 },
-  { id: 'back2Sum', label: '后二和值', min: 0, max: 18 },
-] as const;
-
-const AMP_KEYS = [
-  { id: 'sumAmp', label: '和值振幅', min: 0, max: 27 },
-  { id: 'spanAmp', label: '跨度振幅', min: 0, max: 9 },
-  { id: 'baiAmp', label: '百位振幅', min: 0, max: 9 },
-  { id: 'shiAmp', label: '十位振幅', min: 0, max: 9 },
-  { id: 'geAmp', label: '个位振幅', min: 0, max: 9 },
-  { id: 'sumTailAmp', label: '合值振幅', min: 0, max: 9 },
-] as const;
-
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 // 对码组：05 16 27 38 49
@@ -118,14 +99,14 @@ function matchFilter(type: string, nums: number[], dan: number[], pei: number[])
 
   switch (type) {
     case 'draw': {
-      // 开奖号：必须含所有胆码
-      if (!dan.every((d) => nums.includes(d))) return false;
+      // 开奖号：含任意一个胆码即可（OR 语义）
+      if (!dan.some((d) => nums.includes(d))) return false;
       if (pei.length > 0 && !pei.some((p) => nums.includes(p))) return false;
       return true;
     }
     case 'pair': {
-      // 对码：每个胆码的对码组至少命中一个
-      if (!dan.every((d) => pairGroup(d).some((x) => nums.includes(x)))) return false;
+      // 对码：任意一个胆码的对码组命中即可（OR 语义）
+      if (!dan.some((d) => pairGroup(d).some((x) => nums.includes(x)))) return false;
       if (pei.length > 0 && !pei.some((p) => pairGroup(p).some((x) => nums.includes(x))))
         return false;
       return true;
@@ -179,7 +160,7 @@ export default function AnalyzeScreen() {
   const [countInput, setCountInput] = useState('500');
   const [loadCount, setLoadCount] = useState(500);
 
-  const { records, loading, refreshing, error, source, refresh } = useLotteryHistory(
+  const { records, allRecords, loading, refreshing, error, source, refresh } = useLotteryHistory(
     game.id, loadCount,
   );
 
@@ -211,6 +192,11 @@ export default function AnalyzeScreen() {
   const [dtTuo, setDtTuo] = useState<number[]>([2, 3]);
   const [pos, setPos] = useState<Position>('bai');
   const [posDigit, setPosDigit] = useState(5);
+  const posOptions: Position[] = useMemo(() => {
+    if (game.digitCount === 3) return ['any', 'bai', 'shi', 'ge'];
+    if (game.digitCount === 5) return ['any', 'wan', 'qian', 'bai', 'shi', 'ge'];
+    return ['any'];
+  }, [game.digitCount]);
   const [bai, setBai] = useState<number[]>([]);
   const [shi, setShi] = useState<number[]>([]);
   const [ge, setGe] = useState<number[]>([]);
@@ -229,6 +215,36 @@ export default function AnalyzeScreen() {
 
   const V = game.digitMax - game.digitMin + 1;
   const DD = game.digitCount;
+  const sumMax = game.digitMax * game.digitCount;
+
+  const HEJI_KEYS: readonly { id: string; label: string; min: number; max: number }[] = useMemo(() => [
+    { id: 'sum', label: '和值', min: 0, max: sumMax },
+    { id: 'sumTail', label: '合值', min: 0, max: 9 },
+    { id: 'span', label: '跨度', min: 0, max: 9 },
+    { id: 'pairSumMax', label: '二码合最大', min: 0, max: 9 },
+    { id: 'pairDiffMax', label: '二码差最大', min: 0, max: 9 },
+    { id: 'front2Sum', label: '前二和值', min: 0, max: 18 },
+    { id: 'back2Sum', label: '后二和值', min: 0, max: 18 },
+  ], [sumMax]);
+
+  const AMP_KEYS: readonly { id: string; label: string; min: number; max: number }[] = useMemo(() => {
+    const keys = [
+      { id: 'sumAmp', label: '和值振幅', min: 0, max: sumMax },
+      { id: 'sumTailAmp', label: '合值振幅', min: 0, max: 9 },
+      { id: 'spanAmp', label: '跨度振幅', min: 0, max: 9 },
+      { id: 'baiAmp', label: '百位振幅', min: 0, max: 9 },
+      { id: 'shiAmp', label: '十位振幅', min: 0, max: 9 },
+      { id: 'geAmp', label: '个位振幅', min: 0, max: 9 },
+    ];
+    if (game.digitCount >= 4) keys.push({ id: 'qianAmp', label: '千位振幅', min: 0, max: 9 });
+    if (game.digitCount >= 5) keys.push({ id: 'wanAmp', label: '万位振幅', min: 0, max: 9 });
+    return keys;
+  }, [game.digitCount, sumMax]);
+
+  useEffect(() => {
+    if (game.digitCount === 3 && (pos === 'wan' || pos === 'qian')) setPos('bai');
+    if (hejiValue > sumMax) setHejiValue(Math.floor(sumMax / 2));
+  }, [gameId]);
 
   const target: Target = useMemo(() => {
     if (externalCodes && externalCodes.size > 0 && tab === 'dan')
@@ -300,6 +316,33 @@ export default function AnalyzeScreen() {
   }, [records, tab, ampKey]);
 
   const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD), [target, V, DD]);
+
+  // 全历史最大遗漏（用未截断的 allRecords 计算）
+  const historyMaxMiss = useMemo(() => {
+    if (allRecords.length === 0) return undefined;
+    try {
+      const fullSeries = buildTargetSeries(allRecords, target, V, DD);
+      let maxMiss = 0;
+      let lastOpen = -1;
+      for (let i = 0; i < fullSeries.length; i += 1) {
+        if (fullSeries[i].omission === 0) {
+          const gap = lastOpen >= 0 ? i - lastOpen - 1 : 0;
+          if (gap > maxMiss) maxMiss = gap;
+          lastOpen = i;
+        }
+      }
+      // 尾部尚未开出的持续遗漏也算
+      if (lastOpen >= 0) {
+        const tail = fullSeries.length - lastOpen - 1;
+        if (tail > maxMiss) maxMiss = tail;
+      } else {
+        maxMiss = fullSeries.length;
+      }
+      return maxMiss > 0 ? maxMiss : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [allRecords, target, V, DD]);
   const omissionSeries = useMemo(
     () => series.map((p) => ({ issue: p.issue, omission: p.omission })),
     [series],
@@ -602,7 +645,7 @@ export default function AnalyzeScreen() {
     <>
       <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
         <Text style={{ fontSize: 9, color: '#888', width: 24 }}>位置</Text>
-        {POS_OPTIONS.map((p) => (
+        {posOptions.map((p) => (
           <Pressable key={p} onPress={() => setPos(p)} style={btnStyle(pos === p)}>
             <Text style={txtColor(pos === p)}>{POS_LABEL_MAP[p]}</Text>
           </Pressable>
@@ -820,7 +863,7 @@ export default function AnalyzeScreen() {
               {[
                 { id: 'fc3d', label: '福彩3D', enabled: true },
                 { id: 'pl3', label: '排列3', enabled: true },
-                { id: 'pl5', label: '排列5', enabled: false },
+                { id: 'pl5', label: '排列5', enabled: true },
                 { id: 'kl8', label: '快乐8', enabled: false },
               ].map((g) => (
                 <Pressable
@@ -1074,6 +1117,7 @@ export default function AnalyzeScreen() {
                       height={Math.max(140, height - TOP_BAR_H)}
                       width={typeof width === 'number' ? width - 24 : 334}
                       theoryMiss={theoryMiss}
+                      historyMaxMiss={historyMaxMiss}
                       mode="level1"
                     />
                   )}
@@ -1083,6 +1127,7 @@ export default function AnalyzeScreen() {
                       height={Math.max(140, height - TOP_BAR_H)}
                       width={typeof width === 'number' ? width - 24 : 334}
                       theoryMiss={theoryMiss}
+                      historyMaxMiss={historyMaxMiss}
                       mode="level2"
                     />
                   )}

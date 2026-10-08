@@ -15,6 +15,8 @@ import {
 
 export interface LotteryHistoryState {
   records: DrawRecord[];
+  /** 全量历史（未截断，用于计算全局统计量，如历史最大遗漏） */
+  allRecords: DrawRecord[];
   loading: boolean;
   refreshing: boolean;
   source: DataSource;
@@ -24,6 +26,7 @@ export interface LotteryHistoryState {
 
 export function useLotteryHistory(gameId: string, count: number): LotteryHistoryState {
   const [records, setRecords] = useState<DrawRecord[]>([]);
+  const [allRecords, setAllRecords] = useState<DrawRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<DataSource>('seed');
@@ -39,6 +42,7 @@ export function useLotteryHistory(gameId: string, count: number): LotteryHistory
           ? await refreshHistory(gameId, count)
           : await loadHistory(gameId, count);
         setRecords(result.records);
+        setAllRecords(result.allRecords);
         setSource(result.source);
       } catch (e) {
         setError(e instanceof Error ? e.message : '加载失败');
@@ -56,7 +60,7 @@ export function useLotteryHistory(gameId: string, count: number): LotteryHistory
 
   const refresh = useCallback(() => load(true), [load]);
 
-  return { records, loading, refreshing, source, error, refresh };
+  return { records, allRecords, loading, refreshing, source, error, refresh };
 }
 
 export interface LotteryAnalysis {

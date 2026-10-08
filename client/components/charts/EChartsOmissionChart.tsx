@@ -1,11 +1,10 @@
 /**
  * ECharts 遗漏图（WebView 版）
- * 三种模式：
- *   both   —— 上下双联：二阶 + 一阶（默认）
- *   level1 —— 只显示一阶（铺满整图）
- *   level2 —— 只显示二阶（铺满整图）
- * 球：红=峰值、绿=开出、蓝=最新、紫=虚拟下一期
- * 线：黑实线=理论、红虚线=最大、蓝虚线=平均、蓝/绿/粉=MA5/10/20
+ * 按「开出事件」排列：x 轴 = 第 N 次开出，y = 该次开出的遗漏值（距上次开出的期数）
+ * 模式：
+ *   both   —— 上下双联：二阶 + 一阶
+ *   level1 —— 只显示一阶
+ *   level2 —— 只显示二阶
  */
 import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
@@ -35,102 +34,135 @@ export function EChartsOmissionChart({
   width = 350,
   theoryMiss = 0,
   mode = 'both',
+  historyMaxMiss,
 }: {
   series: SeriesPoint[];
   height?: number;
   width?: number;
   theoryMiss?: number;
   mode?: ChartMode;
+  historyMaxMiss?: number;
 }) {
   const [rangeIdx, setRangeIdx] = useState(0);
 
   const html = useMemo(() => {
-    // 限制最多显示 100 期
-    const MAX_SHOW = 100;
+    const MAX_SHOW = 200;
     const trimmed = series.length > MAX_SHOW ? series.slice(-MAX_SHOW) : series;
-
     const n = trimmed.length;
     if (n === 0) {
       return '<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:12px">暂无数据</body></html>';
     }
 
-    const issues = trimmed.map((p) => p.issue);
     const missValues = trimmed.map((p) => p.omission);
+    const issuesAll = trimmed.map((p) => p.issue);
     const range = RANGES[rangeIdx];
 
-    // 二阶
+    // === 提取开出点（omission === 0）===
+    // opens[k] = { idx: 在原 series 中的位置, issue, miss: 距上次开出的期数 }
+    const opens: { idx: number; issue: string; miss: number }[] = [];
+    for (let i = 0; i < n; i += 1) {
+      if (missValues[i] === 0) {
+        const prevIdx = opens.length > 0 ? opens[opens.length - 1].idx : -1;
+        opens.push({ idx: i, issue: issuesAll[i], miss: i - prevIdx - 1 });
+      }
+    }
+    const nOpens = opens.length;
+    const currentMiss = missValues[n - 1];
+
+    // === 统计 ===
+    const hasPending = currentMiss > 0;
+    const missArr = opens.map((o) => o.miss);
+    const localMaxMiss = Math.max(1, ...missArr, currentMiss);
+    const maxMiss = historyMaxMiss !== undefined && historyMaxMiss >= localMaxMiss ? historyMaxMiss : localMaxMiss;
+    const avgMiss = missArr.length > 0 ? missArr.reduce((a, b) => a + b, 0) / missArr.length : 0;
+
+    // === MA（按球）：最近 N 个球平均，前 N-1 个位置用现有球平均 ===
+    const maOf = (window: number, idx: number): number => {
+      const start = Math.max(0, idx - window + 1);
+      let sum = 0;
+      for (let i = start; i <= idx; i += 1) sum += missArr[i];
+      return sum / (idx - start + 1);
+    };
+    const ma5 = missArr.map((_, i) => maOf(5, i));
+    const ma10 = missArr.map((_, i) => maOf(10, i));
+    const ma20 = missArr.map((_, i) => maOf(20, i));
+    // ? 点
+    {
+      const ext = [...missArr, currentMiss];
+      const mOfExt = (window: number, idx: number): number => {
+        const start = Math.max(0, idx - window + 1);
+        let sum = 0;
+        for (let i = start; i <= idx; i += 1) sum += ext[i];
+        return sum / (idx - start + 1);
+      };
+      ma5.push(mOfExt(5, ext.length - 1));
+      ma10.push(mOfExt(10, ext.length - 1));
+      ma20.push(mOfExt(20, ext.length - 1));
+    }
+
+    // === 二阶（在开出序列上）===
     const secondOrder: { x: number; y: number }[] = [];
     let lastValid: number | null = null;
-    for (let i = 0; i < n; i += 1) {
-      if (missValues[i] >= range.min && missValues[i] <= range.max) {
-        if (lastValid !== null) secondOrder.push({ x: i, y: i - lastValid });
-        lastValid = i;
+    for (let k = 0; k < nOpens; k += 1) {
+      if (missArr[k] >= range.min && missArr[k] <= range.max) {
+        if (lastValid !== null) secondOrder.push({ x: k, y: k - lastValid });
+        lastValid = k;
       }
     }
-
-    // 统计
-    const gaps: number[] = [];
-    for (let i = 1; i < n; i += 1) {
-      if (missValues[i] === 0) gaps.push(missValues[i - 1]);
-    }
-    const maxMiss = Math.max(...missValues, 1);
-    const currentMiss = missValues[n - 1];
-    const avgMiss = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
-
-    // MA
-    const maOf = (period: number, idx: number): number | null => {
-      if (idx + 1 < period) return null;
-      let s = 0;
-      for (let i = idx - period + 1; i <= idx; i += 1) s += missValues[i];
-      return s / period;
-    };
-    const ma5 = missValues.map((_, i) => maOf(5, i));
-    const ma10 = missValues.map((_, i) => maOf(10, i));
-    const ma20 = missValues.map((_, i) => maOf(20, i));
-
-    // 一阶球
-    const balls: { x: number; y: number; color: string; text: string }[] = [];
-    for (let i = 0; i < n; i += 1) {
-      const isLatest = i === n - 1;
-      if (isLatest) {
-        balls.push({ x: i, y: missValues[i], color: '#2563eb', text: String(missValues[i]) });
-        continue;
-      }
-      if (missValues[i] === 0) {
-        balls.push({ x: i, y: 0, color: '#22c55e', text: '0' });
-        continue;
-      }
-      if (missValues[i + 1] === 0) {
-        balls.push({ x: i, y: missValues[i], color: '#e5484d', text: String(missValues[i]) });
-      }
-    }
-    balls.push({ x: n, y: currentMiss, color: '#8b5cf6', text: '?' });
-
-    // 二阶球
     const secondBalls = secondOrder.map((p) => ({ x: p.x, y: p.y, color: '#e5484d', text: String(p.y) }));
-
     const secondMax = niceMax(Math.max(1, ...secondOrder.map((p) => p.y)));
-    const displayMax = niceMax(Math.max(maxMiss, theoryMiss));
 
-    // ---- mode 分派 ----
+    // === 一阶球（每个开出点一个 + 末尾 ? 点）===
+    // 无论有没有 ? 球，右边都留 4 格空白
+    const xMax = Math.max(1, nOpens + 4);
+
+    const balls: { x: number; y: number; color: string; text: string }[] = [];
+    for (let k = 0; k < nOpens; k += 1) {
+      const m = missArr[k];
+      let color = m === 0 ? '#22c55e' : '#e5484d';
+      const fromRight = nOpens - 1 - k; // 0 = 最右
+      if (fromRight === 4) color = '#2563eb';       // 从右数第 5 个 → 蓝
+      else if (fromRight === 9) color = '#22c55e';  // 从右数第 10 个 → 绿
+      else if (fromRight === 19) color = '#8b5cf6'; // 从右数第 20 个 → 紫
+      if (fromRight === 0) color = '#2563eb';       // 当前期（最右开出球）→ 蓝
+      balls.push({ x: k, y: m, color, text: String(m) });
+    }
+    // 当前期未开出 → 补蓝球；已开出 → 循环最右球已改蓝
+    const latestOpened = missValues[n - 1] === 0;
+    let tailX = nOpens - 1;
+    if (!latestOpened) {
+      balls.push({ x: nOpens, y: currentMiss, color: '#2563eb', text: String(currentMiss) });
+      tailX = nOpens;
+    }
+    // ? 球（下一期，未开奖）始终显示
+    balls.push({ x: tailX + 1, y: currentMiss, color: '#8b5cf6', text: '?' });
+
+    // === 折线数据 ===
+    const linePoints: [number, number][] = missArr.map((v, k) => [k, v]);
+    if (missValues[n - 1] !== 0) linePoints.push([nOpens, currentMiss]);
+    linePoints.push([nOpens + 1, currentMiss]);
+
+    const displayMax = niceMax(Math.max(maxMiss, currentMiss, theoryMiss));
+
+    // === 球径：每格宽度的一半 ===
+    const ballSize = 12;
+
+    // === mode 分派 ===
     const isBoth = mode === 'both';
     const isL1 = mode === 'level1';
     const isL2 = mode === 'level2';
-
-    // orig: 0 = 二阶, 1 = 一阶
-    // 返回该 orig 在新图中对应的 gridIndex（null 表示隐藏）
     const mapG = (orig: 0 | 1): 0 | 1 | null => {
       if (isBoth) return orig;
       if (isL1) return orig === 1 ? 0 : null;
-      return orig === 0 ? 0 : null; // isL2
+      return orig === 0 ? 0 : null;
     };
 
     const grid = isBoth
       ? [
-          { left: 36, right: 24, top: 26, height: '34%' },
-          { left: 36, right: 24, top: '56%', height: '36%' },
+          { left: 36, right: 60, top: 26, height: '34%' },
+          { left: 36, right: 60, top: '56%', height: '36%' },
         ]
-      : [{ left: 36, right: 24, top: 26, height: '78%' }];
+      : [{ left: 36, right: 60, top: 26, height: '78%' }];
 
     const secondTitle = `二阶遗漏图（遗漏范围 ${range.min}-${range.max}）`;
     const firstTitle = `一阶遗漏图（历史最大:${maxMiss} 平均:${avgMiss.toFixed(3)} 理论:${theoryMiss.toFixed(3)} 当前:${currentMiss}）`;
@@ -145,30 +177,50 @@ export function EChartsOmissionChart({
       graphic.push({ type: 'text', left: 'center', top: 6, style: { text: firstTitle, fontSize: 10, fill: '#8a8f98' } });
     }
 
-    const makeXAxis = (orig: 0 | 1) => {
-      const gi = mapG(orig);
-      if (gi === null) return null;
-      return {
-        gridIndex: gi,
-        type: 'category',
-        data: issues.concat(['?']),
-        axisTick: { show: false },
-        axisLine: { lineStyle: { color: 'rgba(140,140,150,0.35)' } },
-        axisLabel: (isBoth && orig === 0)
-          ? { show: false }
-          : { fontSize: 7, color: '#8a8f98', interval: Math.max(0, Math.floor(n / 15)) },
-      };
+    const formatXLabel = (v: number) => {
+      const i = Math.round(v);
+      if (Math.abs(v - i) > 0.001) return '';
+      if (i < 0) return '';
+      if (i >= nOpens) return '';
+      if (i % 10 !== 0 && i !== nOpens - 1) return '';
+      return opens[i].issue;
     };
 
-    const makeYAxis = (orig: 0 | 1) => {
+    const makeXAxis = (orig: 0 | 1) => {
       const gi = mapG(orig);
       if (gi === null) return null;
       return {
         gridIndex: gi,
         type: 'value',
         min: 0,
-        max: orig === 0 ? secondMax : displayMax,
-        splitLine: { lineStyle: { color: 'rgba(140,140,150,0.15)' } },
+        max: xMax,
+        axisTick: { show: false },
+        axisLine: { lineStyle: { color: 'rgba(140,140,150,0.35)' } },
+        axisLabel: (isBoth && orig === 0)
+          ? { show: false }
+          : { show: true, fontSize: 7, color: '#8a8f98', formatter: formatXLabel },
+        splitLine: {
+          show: true,
+          interval: 4,
+          lineStyle: { color: 'rgba(140,140,150,0.22)', type: 'dashed' },
+        },
+      };
+    };
+
+    const makeYAxis = (orig: 0 | 1) => {
+      const gi = mapG(orig);
+      if (gi === null) return null;
+      const mx = orig === 0 ? secondMax : displayMax;
+      return {
+        gridIndex: gi,
+        type: 'value',
+        min: 0,
+        max: mx,
+        splitNumber: 12,
+        splitLine: {
+          show: true,
+          lineStyle: { color: 'rgba(140,140,150,0.22)', type: 'dashed' },
+        },
         axisLabel: { fontSize: 8, color: '#8a8f98' },
       };
     };
@@ -200,17 +252,17 @@ export function EChartsOmissionChart({
             formatter: b.text,
             position: 'inside',
             color: '#fff',
-            fontSize: 5,
+            fontSize: Math.max(3, ballSize * 0.55),
             fontWeight: 'bold',
           },
         })),
-        symbolSize: 6,
+        symbolSize: ballSize,
         z: 3,
       }),
       // 一阶折线 + 参考线
       makeSeries(1, {
         type: 'line',
-        data: missValues.map((v, i) => [i, v]),
+        data: linePoints,
         lineStyle: { color: '#1f2937', width: 1.2 },
         itemStyle: { color: 'transparent' },
         symbol: 'none',
@@ -266,11 +318,11 @@ export function EChartsOmissionChart({
             formatter: b.text,
             position: 'inside',
             color: '#fff',
-            fontSize: 5,
+            fontSize: Math.max(3, ballSize * 0.55),
             fontWeight: 'bold',
           },
         })),
-        symbolSize: 6,
+        symbolSize: ballSize,
         z: 5,
       }),
     ].filter(Boolean);
