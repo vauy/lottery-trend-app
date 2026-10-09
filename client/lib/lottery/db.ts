@@ -13,6 +13,31 @@ const DB_NAME = 'lottery.db';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
+/** 串行队列：保证同时只有一个 DB 操作在执行 */
+let dbQueue: Promise<unknown> = Promise.resolve();
+/** 遇 database is locked 时自动重试 */
+async function withRetry<T>(fn: () => Promise<T>, retries = 8, delayMs = 150): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.toLowerCase().includes('locked')) throw e;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const wrapped = () => withRetry(task);
+  const next = dbQueue.then(wrapped, wrapped);
+  dbQueue = next.catch(() => {});
+  return next as Promise<T>;
+}
+
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = (async () => {
@@ -74,9 +99,9 @@ export async function upsertDraws(
   verified: boolean,
 ): Promise<void> {
   if (records.length === 0) return;
-  const d = await getDb();
-  const now = Date.now();
-  await d.withTransactionAsync(async () => {
+  return enqueue(async () => {
+    const d = await getDb();
+    const now = Date.now();
     for (const r of records) {
       await d.runAsync(
         `INSERT INTO draws (game_id, issue, date, nums, source, verified, updated_at)
@@ -93,7 +118,7 @@ export async function upsertDraws(
   });
 }
 
-export async function getAllDraws(gameId: string): Promise<StoredDraw[]> {
+export async function getAllDraws(gameId: string): Promise<StoredDraw[]> {  return enqueue(async () => {
   const d = await getDb();
   const rows = await d.getAllAsync<{
     issue: string; date: string; nums: string;
@@ -109,52 +134,59 @@ export async function getAllDraws(gameId: string): Promise<StoredDraw[]> {
     source: row.source,
     verified: row.verified === 1,
   }));
+  });
 }
 
-export async function countDraws(gameId: string): Promise<number> {
+export async function countDraws(gameId: string): Promise<number> {  return enqueue(async () => {
   const d = await getDb();
   const row = await d.getFirstAsync<{ c: number }>(
     `SELECT COUNT(*) as c FROM draws WHERE game_id = ?`,
     [gameId],
   );
   return row?.c ?? 0;
+  });
 }
 
-export async function backupDraws(gameId: string): Promise<void> {
-  const d = await getDb();
-  await d.runAsync(`DELETE FROM draws_backup WHERE game_id = ?`, [gameId]);
-  await d.runAsync(`INSERT INTO draws_backup SELECT * FROM draws WHERE game_id = ?`, [gameId]);
+export async function backupDraws(gameId: string): Promise<void> {  return enqueue(async () => {
+    const d = await getDb();
+    await d.runAsync(`DELETE FROM draws_backup WHERE game_id = ?`, [gameId]);
+    await d.runAsync(`INSERT INTO draws_backup SELECT * FROM draws WHERE game_id = ?`, [gameId]);
+  });
 }
 
-export async function restoreBackupDraws(gameId: string): Promise<void> {
-  const d = await getDb();
-  await d.runAsync(`DELETE FROM draws WHERE game_id = ?`, [gameId]);
-  await d.runAsync(`INSERT INTO draws SELECT * FROM draws_backup WHERE game_id = ?`, [gameId]);
+export async function restoreBackupDraws(gameId: string): Promise<void> {  return enqueue(async () => {
+    const d = await getDb();
+    await d.runAsync(`DELETE FROM draws WHERE game_id = ?`, [gameId]);
+    await d.runAsync(`INSERT INTO draws SELECT * FROM draws_backup WHERE game_id = ?`, [gameId]);
+  });
 }
 
-export async function dropBackupDraws(gameId: string): Promise<void> {
-  const d = await getDb();
-  await d.runAsync(`DELETE FROM draws_backup WHERE game_id = ?`, [gameId]);
+export async function dropBackupDraws(gameId: string): Promise<void> {  return enqueue(async () => {
+    const d = await getDb();
+    await d.runAsync(`DELETE FROM draws_backup WHERE game_id = ?`, [gameId]);
+  });
 }
 
 export async function addConflict(
   gameId: string, issue: string,
   numsA: number[], numsB: number[],
   sourceA: string, sourceB: string,
-): Promise<void> {
-  const d = await getDb();
-  await d.runAsync(
-    `INSERT OR REPLACE INTO conflicts (game_id, issue, nums_a, nums_b, source_a, source_b, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [gameId, issue, JSON.stringify(numsA), JSON.stringify(numsB), sourceA, sourceB, Date.now()],
-  );
+): Promise<void> {  return enqueue(async () => {
+    const d = await getDb();
+    await d.runAsync(
+      `INSERT OR REPLACE INTO conflicts (game_id, issue, nums_a, nums_b, source_a, source_b, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [gameId, issue, JSON.stringify(numsA), JSON.stringify(numsB), sourceA, sourceB, Date.now()],
+    );
+  });
 }
 
-export async function countConflicts(gameId: string): Promise<number> {
+export async function countConflicts(gameId: string): Promise<number> {  return enqueue(async () => {
   const d = await getDb();
   const row = await d.getFirstAsync<{ c: number }>(
     `SELECT COUNT(*) as c FROM conflicts WHERE game_id = ?`,
     [gameId],
   );
   return row?.c ?? 0;
+  });
 }

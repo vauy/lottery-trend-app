@@ -430,7 +430,7 @@ export default function AnalyzeScreen() {
     if (tab !== 'amp') return null;
     const sliced = records.length > 500 ? records.slice(-500) : records;
     return buildRawSeries(sliced, ampKey as any);
-  }, [records, tab, ampKey]);
+  }, [records, tab, ampKey, ampMax]);
 
   const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD, samplingMode), [target, V, DD, samplingMode]);
 
@@ -1678,6 +1678,7 @@ export default function AnalyzeScreen() {
                 height={Math.max(200, height - TOP_BAR_H - 8)}
                 width={typeof width === 'number' ? width - 24 : 334}
                 title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                highlightValue={ampMax}
               />
               )}
             </View>
@@ -1763,6 +1764,7 @@ export default function AnalyzeScreen() {
                         barWidth={1.5}
                         hideShadow={true}
                         heightScale={1}
+                        targetLabel={getTargetLabel(ct)}
                       />
                     )}
                     {m === 'omissionK' && (
@@ -1822,6 +1824,7 @@ export default function AnalyzeScreen() {
                         barWidth={1.5}
                         hideShadow={true}
                         heightScale={1}
+                        targetLabel={getTargetLabel(target)}
                       />
                     )}
                   {m === 'omissionLine' && (

@@ -371,6 +371,7 @@ export async function fetchAllAndVerify(
     for (const r of backup) backupMap.set(r.issue, r);
 
     // 逐期对比 + 标记
+    const conflictBatch: { issue: string; numsA: number[]; numsB: number[] }[] = [];
     const merged: DrawRecord[] = [];
     const verifiedIssues = new Set<string>();
     for (const r of primary) {
@@ -379,8 +380,8 @@ export async function fetchAllAndVerify(
         if (sameDraw(r, b)) {
           verifiedIssues.add(r.issue);
         } else {
-          // 冲突：记入 conflicts 表
-          await addConflict(gameId, r.issue, r.nums, b.nums, 'primary', 'cwl');
+          // 冲突：收集，最后批量写
+          conflictBatch.push({ issue: r.issue, numsA: r.nums, numsB: b.nums });
           stats.conflicts += 1;
         }
       }
@@ -404,6 +405,11 @@ export async function fetchAllAndVerify(
         'primary',
         true,
       );
+    }
+
+    onProgress?.('写入冲突记录…');
+    for (const c of conflictBatch) {
+      await addConflict(gameId, c.issue, c.numsA, c.numsB, 'primary', 'cwl');
     }
 
     onProgress?.('清理备份…');

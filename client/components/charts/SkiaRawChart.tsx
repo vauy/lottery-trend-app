@@ -26,12 +26,14 @@ export function SkiaRawChart({
   width = 350,
   title,
   targetLabel,
+  highlightValue,
 }: {
   data: RawPoint[];
   height?: number;
   width?: number;
   title?: string;
   targetLabel?: string;
+  highlightValue?: number;
 }) {
   const points = data.length > MAX_SHOW ? data.slice(-MAX_SHOW) : data;
   const n = points.length;
@@ -171,24 +173,27 @@ export function SkiaRawChart({
 
       {/* 球内数字 */}
       {n <= 100 &&
-        points.map((p, i) => (
-          <Text
-            key={`bv-${i}`}
-            style={{
-              position: 'absolute',
-              left: xFor(i) - 10,
-              top: yFor(p.value) - fontSize / 2 - 1,
-              width: 20,
-              textAlign: 'center',
-              fontSize,
-              lineHeight: fontSize + 1,
-              color: '#fff',
-              fontWeight: 'bold',
-            }}
-          >
-            {p.value}
-          </Text>
-        ))}
+        points.map((p, i) => {
+          if (highlightValue !== undefined && p.value !== highlightValue) return null;
+          return (
+            <Text
+              key={`bv-${i}`}
+              style={{
+                position: 'absolute',
+                left: xFor(i) - 10,
+                top: yFor(p.value) - fontSize / 2 - 1,
+                width: 20,
+                textAlign: 'center',
+                fontSize,
+                lineHeight: fontSize + 1,
+                color: '#fff',
+                fontWeight: 'bold',
+              }}
+            >
+              {p.value}
+            </Text>
+          );
+        })}
 
       {/* X 轴期号 */}
       {points.map((p, i) => {
