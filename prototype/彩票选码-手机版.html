@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>臻奇妙选码 · 手机版</title>
+<style>
+:root{
+  --bg: oklch(0.16 0.014 160);
+  --surface: oklch(0.21 0.018 162);
+  --surface-2: oklch(0.26 0.02 163);
+  --line: oklch(0.32 0.025 162);
+  --ink: oklch(0.93 0.01 155);
+  --ink-dim: oklch(0.68 0.02 158);
+  --accent: oklch(0.78 0.17 155);      /* 翡翠绿：延续原系统绿色基因 */
+  --accent-ink: oklch(0.2 0.05 155);
+  --amber: oklch(0.8 0.14 80);         /* 原系统"毒胆"橙，作选中强调 */
+  --amber-ink: oklch(0.25 0.06 80);
+  --danger: oklch(0.7 0.16 25);
+  --r: 12px;
+  --pad: clamp(12px, 3.5vw, 20px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{font-size:16px}
+body{
+  background:var(--bg);color:var(--ink);
+  font-family:"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  min-height:100dvh;padding-bottom:calc(76px + env(safe-area-inset-bottom));
+}
+/* ───── 顶栏 ───── */
+header{
+  position:sticky;top:0;z-index:20;
+  background:color-mix(in oklch, var(--bg) 88%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+  padding:env(safe-area-inset-top) var(--pad) 0;
+}
+.brand{display:flex;align-items:baseline;gap:8px;padding:12px 0 10px}
+.brand h1{font-size:1.05rem;font-weight:700;letter-spacing:.06em}
+.brand small{color:var(--ink-dim);font-size:.72rem;letter-spacing:.12em}
+/* 模式页签：横向滚动 chips */
+.tabs{
+  display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;
+  padding-bottom:10px;
+}
+.tabs::-webkit-scrollbar{display:none}
+.tab{
+  flex:0 0 auto;padding:7px 14px;border-radius:999px;
+  border:1px solid var(--line);background:var(--surface);
+  color:var(--ink-dim);font-size:.85rem;line-height:1;
+  transition:background .18s cubic-bezier(.16,1,.3,1), color .18s;
+}
+.tab[aria-selected="true"]{
+  background:var(--accent);color:var(--accent-ink);
+  border-color:var(--accent);font-weight:600;
+}
+/* ───── 主体 ───── */
+main{padding:var(--pad);display:flex;flex-direction:column;gap:16px;max-width:560px;margin:0 auto}
+.panel{
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r);padding:14px;
+}
+.panel-label{
+  font-size:.72rem;color:var(--ink-dim);letter-spacing:.18em;
+  margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;
+}
+/* 类型分段控件 */
+.seg{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.seg button{
+  padding:11px 2px;border-radius:9px;border:1px solid transparent;
+  background:transparent;color:var(--ink-dim);font-size:.82rem;
+  transition:all .18s cubic-bezier(.16,1,.3,1);
+}
+.seg button[aria-pressed="true"]{
+  background:var(--surface-2);color:var(--accent);
+  border-color:var(--accent);font-weight:600;
+}
+/* 数字键盘行 */
+.digit-row{display:grid;grid-template-columns:repeat(10,1fr);gap:5px;margin-top:12px}
+.digit{
+  aspect-ratio:1/1.15;border-radius:9px;border:1px solid var(--line);
+  background:var(--surface-2);color:var(--ink);
+  font-size:clamp(1rem,4.2vw,1.25rem);font-weight:600;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .15s cubic-bezier(.16,1,.3,1);
+}
+.digit:active{transform:scale(.9)}
+.digit.on{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
+.digit-row-head{
+  display:flex;align-items:center;gap:10px;margin-top:14px;
+}
+.row-tag{
+  flex:0 0 auto;width:2.6em;text-align:center;
+  font-size:.8rem;color:var(--ink-dim);font-weight:600;
+}
+.digit-row-head .digit-row{flex:1;margin-top:0}
+.mini{
+  flex:0 0 auto;padding:8px 10px;border-radius:8px;font-size:.75rem;
+  border:1px solid var(--line);background:transparent;color:var(--ink-dim);
+}
+.mini:active{background:var(--surface-2)}
+/* 开关与选项 */
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+  padding:9px 14px;border-radius:9px;border:1px solid var(--line);
+  background:transparent;color:var(--ink-dim);font-size:.82rem;
+  transition:all .18s cubic-bezier(.16,1,.3,1);
+}
+.chip.on{background:color-mix(in oklch,var(--accent) 22%,var(--surface));
+  color:var(--accent);border-color:var(--accent);font-weight:600}
+.switch-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0}
+.switch-row span{font-size:.88rem}
+.sw{
+  width:48px;height:28px;border-radius:999px;background:var(--surface-2);
+  border:1px solid var(--line);position:relative;transition:background .2s;
+}
+.sw::after{
+  content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;
+  border-radius:50%;background:var(--ink-dim);transition:all .22s cubic-bezier(.16,1,.3,1);
+}
+.sw[aria-checked="true"]{background:var(--accent);border-color:var(--accent)}
+.sw[aria-checked="true"]::after{left:22px;background:var(--accent-ink)}
+/* 同屏组合预览 */
+.preview{
+  font-family:"SF Mono",Menlo,monospace;font-size:.85rem;line-height:1.9;
+  color:var(--ink-dim);
+}
+.preview b{color:var(--amber);font-weight:600}
+/* 定位面板 */
+.pos-row{display:flex;gap:8px;margin-top:10px}
+.pos{
+  flex:1;padding:12px 0;border-radius:10px;text-align:center;
+  border:1px solid var(--line);background:var(--surface-2);
+  color:var(--ink-dim);font-size:.9rem;
+}
+.pos.on{border-color:var(--accent);color:var(--accent);font-weight:600}
+/* 状态条 */
+.status{
+  font-family:"SF Mono",Menlo,monospace;font-size:.72rem;
+  color:var(--ink-dim);display:flex;gap:14px;flex-wrap:wrap;
+}
+.status b{color:var(--accent);font-weight:500}
+/* ───── 底部操作栏 ───── */
+.actionbar{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;
+  display:flex;gap:10px;align-items:center;
+  padding:12px var(--pad) calc(12px + env(safe-area-inset-bottom));
+  background:color-mix(in oklch, var(--bg) 92%, transparent);
+  backdrop-filter:blur(10px);border-top:1px solid var(--line);
+  max-width:560px;margin:0 auto;
+}
+.btn-ghost{
+  padding:14px 18px;border-radius:var(--r);font-size:.92rem;
+  border:1px solid var(--line);background:transparent;color:var(--ink);
+}
+.btn-main{
+  flex:1;padding:14px;border-radius:var(--r);font-size:1rem;font-weight:700;
+  letter-spacing:.2em;background:var(--accent);color:var(--accent-ink);
+  border:none;transition:transform .15s cubic-bezier(.16,1,.3,1);
+}
+.btn-main:active{transform:scale(.97)}
+/* toast */
+#toast{
+  position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(8px);opacity:0;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--ink);
+  padding:10px 18px;border-radius:999px;font-size:.82rem;pointer-events:none;
+  transition:all .25s cubic-bezier(.16,1,.3,1);z-index:50;white-space:nowrap;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (min-width:560px){ body{background:oklch(0.13 0.012 160)} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><h1>臻奇妙选码</h1><small>趋势分析 · 手机版</small></div>
+  <nav class="tabs" id="tabs">
+    <button class="tab" aria-selected="true">常用</button>
+    <button class="tab">毒胆</button>
+    <button class="tab">胆拖</button>
+    <button class="tab">定位</button>
+    <button class="tab">复式</button>
+    <button class="tab">组合视码</button>
+    <button class="tab">组内随机</button>
+    <button class="tab">随机交并</button>
+    <button class="tab">分组胆</button>
+  </nav>
+</header>
+
+<main>
+  <!-- 类型 -->
+  <section class="panel">
+    <div class="panel-label"><span>类 型</span><span id="typeHint">开奖号 · 直选出号</span></div>
+    <div class="seg" id="typeSeg">
+      <button aria-pressed="true">开奖号</button>
+      <button aria-pressed="false">对码</button>
+      <button aria-pressed="false">两码合</button>
+      <button aria-pressed="false">两码差</button>
+      <button aria-pressed="false">两码跨</button>
+    </div>
+  </section>
+
+  <!-- 胆码 -->
+  <section class="panel">
+    <div class="panel-label"><span>胆 码</span><span>单击选中，直接出图</span></div>
+    <div class="digit-row-head">
+      <span class="row-tag">胆码</span>
+      <div class="digit-row" id="danRow"></div>
+    </div>
+    <div class="digit-row-head">
+      <span class="row-tag">配码</span>
+      <div class="digit-row" id="peiRow"></div>
+    </div>
+    <div class="opts" style="margin-top:12px;justify-content:flex-end">
+      <button class="mini" data-clear="dan">清空胆码</button>
+      <button class="mini" data-clear="pei">清空配码</button>
+    </div>
+  </section>
+
+  <!-- 选项 -->
+  <section class="panel">
+    <div class="panel-label"><span>选 项</span></div>
+    <div class="switch-row">
+      <span>允许多选<small style="color:var(--ink-dim)">（多个胆码并集出图）</small></span>
+      <button class="sw" id="multiSw" role="switch" aria-checked="false"></button>
+    </div>
+    <div class="opts" style="margin-top:10px">
+      <button class="chip" id="c1">毒胆同屏</button>
+      <button class="chip" id="c2">对码同屏</button>
+      <button class="chip" id="c3">二码同屏</button>
+      <button class="chip" id="c4">计重</button>
+    </div>
+  </section>
+
+  <!-- 组合预览 -->
+  <section class="panel">
+    <div class="panel-label"><span>当前组合</span></div>
+    <div class="preview" id="preview">尚未选择胆码 —— 单击上方数字直接出【毒胆】</div>
+  </section>
+
+  <!-- 定位（对应"定位"页签的百十个） -->
+  <section class="panel" id="posPanel">
+    <div class="panel-label"><span>定 位</span><span>可多选</span></div>
+    <div class="pos-row" id="posRow">
+      <button class="pos on">百位</button>
+      <button class="pos">十位</button>
+      <button class="pos">个位</button>
+    </div>
+  </section>
+
+  <div class="status">
+    <span>胆配:<b id="stDanpei">0 | —</b></span>
+    <span>频率线:<b>1</b></span>
+    <span>周期:<b id="stCycle">6.944</b></span>
+    <span>当前遗漏:<b id="stMiss">15</b></span>
+  </div>
+</main>
+
+<div class="actionbar">
+  <button class="btn-ghost" id="resetBtn">重置</button>
+  <button class="btn-main" id="goBtn">出 图</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const danRow=$('#danRow'),peiRow=$('#peiRow');
+const dan=new Set(),pei=new Set();
+let multi=false,type='开奖号';
+
+// 生成 0-9 数字键
+function buildDigits(row,set,label){
+  for(let i=0;i<=9;i++){
+    const b=document.createElement('button');
+    b.className='digit';b.textContent=i;
+    b.onclick=()=>{
+      set.has(i)?set.delete(i):set.add(i);
+      if(!multi&&set.size>1){ // 未开多选时仅保留最后一个
+        set.clear();set.add(i);
+      }
+      sync();toast(label+(set.has(i)?' 已选 ':' 已取消 ')+i);
+    };
+    row.appendChild(b);
+  }
+}
+buildDigits(danRow,dan,'胆码');
+buildDigits(peiRow,pei,'配码');
+
+function paint(row,set){
+  [...row.children].forEach((b,i)=>b.classList.toggle('on',set.has(i)));
+}
+function sync(){
+  paint(danRow,dan);paint(peiRow,pei);
+  const d=[...dan].join(','),p=[...pei].join('');
+  $('#stDanpei').textContent=(d||'—')+' | '+(p||'—');
+  const pv=$('#preview');
+  if(dan.size===0){pv.innerHTML='尚未选择胆码 —— 单击上方数字直接出【毒胆】';}
+  else if(pei.size===0){pv.innerHTML='胆码 <b>'+d+'</b> → 直接出【毒胆 '+d+'】';}
+  else if(multi&&dan.size>1&&pei.size>1){
+    pv.innerHTML='多选模式：胆码 <b>'+d+'</b> 分别与配码 <b>'+p+'</b> 逐一同屏出图';
+  }else{
+    pv.innerHTML='胆码 <b>'+d+'</b> + 配码 <b>'+p+'</b> → 组成一组号码出图';
+  }
+}
+// 类型切换
+$('#typeSeg').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  [...$('#typeSeg').children].forEach(x=>x.setAttribute('aria-pressed',x===b));
+  type=b.textContent;
+  const hints={'开奖号':'开奖号 · 直选出号','对码':'对码 · 49/05/16/27/38','两码合':'两码合 · 和值尾','两码差':'两码差 · 差值匹配','两码跨':'两码跨 · 跨度匹配'};
+  $('#typeHint').textContent=hints[type];
+});
+// 页签切换
+$('#tabs').addEventListener('click',e=>{
+  const b=e.target.closest('.tab');if(!b)return;
+  [...$('#tabs').children].forEach(x=>x.setAttribute('aria-selected',x===b));
+  $('#posPanel').style.display=b.textContent==='定位'?'':'none';
+  toast('已切换到【'+b.textContent+'】');
+});
+// 开关与 chips
+$('#multiSw').onclick=e=>{
+  multi=!multi;e.target.setAttribute('aria-checked',multi);sync();
+  if(!multi){if(dan.size>1)retainLast(dan);if(pei.size>1)retainLast(pei);}
+};
+function retainLast(s){const v=[...s].pop();s.clear();s.add(v);sync();}
+document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>c.classList.toggle('on'));
+$('#posRow').addEventListener('click',e=>e.target.closest('.pos')?.classList.toggle('on'));
+// 清空 / 重置 / 出图
+document.querySelectorAll('[data-clear]').forEach(b=>b.onclick=()=>{
+  (b.dataset.clear==='dan'?dan:pei).clear();sync();
+});
+$('#resetBtn').onclick=()=>{dan.clear();pei.clear();sync();toast('已重置');};
+$('#goBtn').onclick=()=>{
+  if(dan.size===0){toast('请先选择胆码');return;}
+  toast('出图：'+$('#stDanpei').textContent+' · '+type+(document.querySelector('#c1.on')?' · 毒胆同屏':''));
+};
+// toast
+let tt;
+function toast(msg){
+  const t=$('#toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),1600);
+}
+sync();
+</script>
+</body>
+</html>

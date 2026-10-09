@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>臻奇妙彩票趋势分析 · 响应式原型</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="shell">
+  <!-- 品牌 -->
+  <header class="brand">
+    <div class="logo">奇</div>
+    <div>
+      <h1>臻奇妙趋势分析</h1>
+      <div class="sub">TREND · 手机原型</div>
+    </div>
+  </header>
+
+  <!-- 彩种 -->
+  <div class="gamebar">
+    <div class="game-list" id="gameList"></div>
+    <div class="status-pill" id="statusPill">数据 <b>—</b></div>
+  </div>
+
+  <!-- 主导航 -->
+  <nav class="prinav">
+    <div class="seg" id="prinav">
+      <button data-screen="analyze" aria-current="true">分析</button>
+      <button data-screen="group">组号 ▲</button>
+    </div>
+  </nav>
+
+  <!-- 子页签 -->
+  <div class="subtabs"><div class="row" id="subtabs"></div></div>
+
+  <!-- 内容 -->
+  <main class="content" id="content"></main>
+
+  <!-- 底部操作栏 -->
+  <nav class="bottombar" id="bottombar"></nav>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
