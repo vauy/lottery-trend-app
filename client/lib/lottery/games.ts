@@ -50,6 +50,17 @@ export const PL3: GameTypeDef = {
 };
 
 /** 排列5 —— 预留，前端暂不暴露 */
+
+/** 快乐8 —— 1-80 号码池，每期开 20 个号 */
+export const KL8: GameTypeDef = {
+  id: 'kl8',
+  name: '快乐8',
+  digitCount: 20,      // 每期开 20 个号
+  digitMin: 1,
+  digitMax: 80,
+  groups: [],          // 快乐8 无位置属性分组
+};
+
 export const PL5: GameTypeDef = {
   id: 'pl5',
   name: '排列5',
@@ -70,7 +81,8 @@ export const PAIR_CODE: Record<number, [number, number]> = {
 export const GAMES: Record<string, GameTypeDef> = {
   fc3d: FC3D,
   pl3: PL3,
-  pl5: PL5, // 预留：前端暂不展示，等 targets 支持任意位数后启用
+  pl5: PL5,
+  kl8: KL8,
 };
 
 export function getGame(id: string): GameTypeDef {

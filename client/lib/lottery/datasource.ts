@@ -44,6 +44,10 @@ export function parseDate(raw: string): string {
  * 从 17500 抓取全量历史开奖（正序）。
  */
 export async function fetchFullHistory(gameId: string): Promise<DrawRecord[]> {
+  // 快乐8 走中彩网 API
+  if (gameId === 'kl8') {
+    return fetchKl8History();
+  }
   const fileName = SOURCE_MAP[gameId];
   if (!fileName) {
     throw new Error(`未配置的数据源：${gameId}`);
@@ -68,6 +72,39 @@ export async function fetchFullHistory(gameId: string): Promise<DrawRecord[]> {
  * 解析 17500 文本格式：
  *   期号 日期 百 十 个 [其他...]
  */
+
+
+/** 中彩网快乐8 API */
+const KL8_API = 'https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=kl8&issueCount=2000';
+
+/** 抓取快乐8 全量历史（正序，最多 2000 期） */
+export async function fetchKl8History(): Promise<DrawRecord[]> {
+  const resp = await fetch(KL8_API, {
+    method: 'GET',
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+      Accept: 'application/json, */*',
+      Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/',
+    },
+  });
+  if (!resp.ok) throw new Error(`中彩网 HTTP ${resp.status}`);
+  const json: any = await resp.json();
+  const list: any[] = json?.result ?? [];
+  const out: DrawRecord[] = list
+    .map((r) => ({
+      issue: String(r.code ?? ''),
+      date: String(r.date ?? '').split('(')[0],
+      nums: String(r.red ?? '')
+        .split(',')
+        .map((x) => parseInt(x, 10))
+        .filter((n) => Number.isFinite(n)),
+    }))
+    .filter((r) => r.nums.length === 20)
+    .reverse(); // 转正序
+  return out;
+}
+
 export function parse17500Text(text: string): DrawRecord[] {
   const out: DrawRecord[] = [];
   const lines = text.split(/\r?\n/);
