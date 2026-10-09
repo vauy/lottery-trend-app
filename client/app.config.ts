@@ -1,10 +1,10 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
 const isDev = process.env.APP_VARIANT === 'development';
-const baseName = process.env.COZE_PROJECT_NAME || process.env.EXPO_PUBLIC_COZE_PROJECT_NAME || '应用';
+const baseName = process.env.COZE_PROJECT_NAME || process.env.EXPO_PUBLIC_COZE_PROJECT_NAME || '臻奇妙趋势分析';
 const appName = isDev ? `${baseName} Dev` : baseName;
 const projectId = process.env.COZE_PROJECT_ID || process.env.EXPO_PUBLIC_COZE_PROJECT_ID;
-const slugBase = projectId ? `app${projectId}` : 'myapp';
+const slugBase = projectId ? `app${projectId}` : 'lottery-trend';
 const slugAppName = isDev ? `${slugBase}-dev` : slugBase;
 
 export default ({ config }: ConfigContext): ExpoConfig => {
@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     "name": appName,
     "slug": slugAppName,
     "version": "1.0.0",
-    "orientation": "landscape",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": isDev ? "vauylottery-dev" : "vauylottery",
     "userInterfaceStyle": "automatic",
