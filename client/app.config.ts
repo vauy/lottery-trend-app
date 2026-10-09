@@ -1,8 +1,11 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
-const appName = process.env.COZE_PROJECT_NAME || process.env.EXPO_PUBLIC_COZE_PROJECT_NAME || '应用';
+const isDev = process.env.APP_VARIANT === 'development';
+const baseName = process.env.COZE_PROJECT_NAME || process.env.EXPO_PUBLIC_COZE_PROJECT_NAME || '应用';
+const appName = isDev ? `${baseName} Dev` : baseName;
 const projectId = process.env.COZE_PROJECT_ID || process.env.EXPO_PUBLIC_COZE_PROJECT_ID;
-const slugAppName = projectId ? `app${projectId}` : 'myapp';
+const slugBase = projectId ? `app${projectId}` : 'myapp';
+const slugAppName = isDev ? `${slugBase}-dev` : slugBase;
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   return {
@@ -12,7 +15,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     "version": "1.0.0",
     "orientation": "landscape",
     "icon": "./assets/images/icon.png",
-    "scheme": "vauylottery",
+    "scheme": isDev ? "vauylottery-dev" : "vauylottery",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -23,7 +26,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.vauy.lottery"
+      "package": isDev ? "com.vauy.lottery.dev" : "com.vauy.lottery"
     },
     "web": {
       "bundler": "metro",
