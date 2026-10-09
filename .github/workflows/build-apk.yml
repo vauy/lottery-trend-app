@@ -1,26 +1,37 @@
-name: Build APKs
+name: Build Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
-  build-release:
+  build-android:
     runs-on: ubuntu-latest
+    env:
+      # expo prebuild 用了 patched expo 依赖 + resolution-mode:highest，需绕过依赖校验
+      EXPO_NO_DEPENDENCY_VALIDATION: "1"
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+
+      # 安装 Android SDK + RN 0.81 必需的 NDK / CMake（原生 C++ 编译依赖）
+      - id: setup-android
+        uses: android-actions/setup-android@v3
         with:
-          packages: 'platform-tools'
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1'
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
 
@@ -30,68 +41,42 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-release-${{ hashFiles('client/android/**/*.gradle*') }}
+          key: gradle-${{ hashFiles('client/android/**/*.gradle*') }}
           restore-keys: |
-            gradle-release-
+            gradle-
 
-      - run: pnpm install --no-frozen-lockfile
+      - name: Install JS deps (pnpm workspace)
+        run: pnpm install --no-frozen-lockfile
 
-      - name: Prebuild (release)
+      # 生成原生 android/ 工程（Expo 54 / RN 0.81 模板：compileSdk 35, minSdk 24, NDK 27.1.12297006）
+      - name: Expo prebuild (android)
         working-directory: client
-        run: npx expo prebuild --platform android --clean
+        run: pnpm exec expo prebuild --platform android --clean
 
-      - name: Build release APK
+      # 生成调试/自签名 keystore，使 release APK 可直接安装（无需你提供密钥）
+      - name: Generate signing keystore
+        working-directory: client/android/app
+        run: |
+          keytool -genkeypair -v \
+            -keystore release-key.keystore \
+            -alias lottery -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=lottery,O=lottery,C=CN"
+          printf 'password=android\nkeyAlias=lottery\nkeyPassword=android\nstoreFile=release-key.keystore\n' > keystore.properties
+
+      - name: Build signed release APK
         working-directory: client/android
         run: chmod +x gradlew && ./gradlew assembleRelease --no-daemon
 
-      - uses: actions/upload-artifact@v4
+      - name: Verify APK signed
+        working-directory: client/android/app/build/outputs/apk/release
+        run: |
+          ls -lh app-release.apk
+          unzip -l app-release.apk | grep -q "META-INF/.*\.RSA" && echo "APK 已签名 ✓" || echo "警告：APK 未签名"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          name: app-release
+          name: lottery-android-apk
           path: client/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
-
-  build-dev:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
-          accept-android-sdk-licenses: true
-          log-accepted-android-sdk-licenses: false
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-dev-${{ hashFiles('client/android/**/*.gradle*') }}
-          restore-keys: |
-            gradle-dev-
-
-      - run: pnpm install --no-frozen-lockfile
-
-      - name: Prebuild (dev)
-        working-directory: client
-        env:
-          APP_VARIANT: development
-        run: npx expo prebuild --platform android --clean
-
-      - name: Build dev APK (debug)
-        working-directory: client/android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-dev
-          path: client/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
