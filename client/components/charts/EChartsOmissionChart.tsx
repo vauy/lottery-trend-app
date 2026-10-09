@@ -139,8 +139,10 @@ export function EChartsOmissionChart({
 
     // === 折线数据 ===
     const linePoints: [number, number][] = missArr.map((v, k) => [k, v]);
-    if (missValues[n - 1] !== 0) linePoints.push([nOpens, currentMiss]);
-    linePoints.push([nOpens + 1, currentMiss]);
+    // 补蓝球位置（已开出时是 ? 球位置）
+    linePoints.push([nOpens, currentMiss]);
+    // 未开出时，蓝球 + ? 球都在右侧
+    if (!latestOpened) linePoints.push([nOpens + 1, currentMiss]);
 
     const displayMax = niceMax(Math.max(maxMiss, currentMiss, theoryMiss));
 
