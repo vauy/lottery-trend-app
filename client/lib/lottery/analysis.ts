@@ -319,16 +319,26 @@ export function movingAverage(
 }
 
 
-/** 位置类型 */
-export type PosKey = 'any' | 'bai' | 'shi' | 'ge';
+/** 位置类型（同时支持 3 位 百/十/个 与 5 位 万/千/百/十/个） */
+export type PosKey = 'any' | 'wan' | 'qian' | 'bai' | 'shi' | 'ge';
 
-/** 判断某期是否命中（按位置） */
+/**
+ * 判断某期是否命中（按位置）。
+ * 采用「从右往左」下标，自动适配位数：
+ *   ge=末位, shi=末-1, bai=末-2, qian=末-3, wan=末-4
+ * 3 位 → bai=0/shi=1/ge=2；5 位 → wan=0/qian=1/bai=2/shi=3/ge=4。
+ */
 export function isHitByPos(nums: number[], digit: number, pos: PosKey): boolean {
   if (pos === 'any') return nums.includes(digit);
-  if (pos === 'bai') return nums[0] === digit;
-  if (pos === 'shi') return nums[1] === digit;
-  if (pos === 'ge') return nums[2] === digit;
-  return false;
+  const fromRight: Record<Exclude<PosKey, 'any'>, number> = {
+    ge: 0,
+    shi: 1,
+    bai: 2,
+    qian: 3,
+    wan: 4,
+  };
+  const idx = nums.length - 1 - fromRight[pos];
+  return idx >= 0 && nums[idx] === digit;
 }
 
 /** 按位置构建趋势点（K线） */

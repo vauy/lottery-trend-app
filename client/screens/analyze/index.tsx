@@ -21,9 +21,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/components/Screen';
 import { EChartsFreqKChart } from '@/components/charts/EChartsFreqKChart';
 import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
-import { OmissionChart } from '@/components/charts/OmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
-import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
+// 注：原 SkiaRawChart 已改用 EChartsRawChart，
+// 以保证 App 可在 Expo Go（Termux 热更新）运行，不依赖自定义原生模块。
+import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
 import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
@@ -294,6 +295,25 @@ export default function AnalyzeScreen() {
   const [bai, setBai] = useState<number[]>([]);
   const [shi, setShi] = useState<number[]>([]);
   const [ge, setGe] = useState<number[]>([]);
+  // 排列五：万位 / 千位
+  const [wan, setWan] = useState<number[]>([]);
+  const [qian, setQian] = useState<number[]>([]);
+
+  /** 定位（复式倍数）按位选择的位置槽：3 位=百/十/个，5 位=万/千/百/十/个 */
+  const posSlots = useMemo(() => {
+    const slots: { key: string; label: string; arr: number[]; setArr: (v: number[]) => void }[] = [
+      { key: 'bai', label: '百位', arr: bai, setArr: setBai },
+      { key: 'shi', label: '十位', arr: shi, setArr: setShi },
+      { key: 'ge', label: '个位', arr: ge, setArr: setGe },
+    ];
+    if (game.digitCount >= 5) {
+      slots.unshift(
+        { key: 'qian', label: '千位', arr: qian, setArr: setQian },
+        { key: 'wan', label: '万位', arr: wan, setArr: setWan },
+      );
+    }
+    return slots;
+  }, [game.digitCount, bai, shi, ge, wan, qian]);
   const [multiMode, setMultiMode] = useState<'pos' | 'nopos'>('pos');
   const [noposNums, setNoposNums] = useState<number[]>([]);
   const [hejiKey, setHejiKey] = useState<string>('sum');
@@ -382,7 +402,7 @@ export default function AnalyzeScreen() {
       else if (tab === 'pos') digitsForShape = [posDigit];
       else if (tab === 'multi') {
         digitsForShape = multiMode === 'pos'
-          ? [...new Set([...bai, ...shi, ...ge])]
+          ? [...new Set(posSlots.flatMap((s) => s.arr))]
           : [...noposNums];
       }
       else digitsForShape = shapeDigits;
@@ -454,11 +474,15 @@ export default function AnalyzeScreen() {
     if (tab === 'pos') return { kind: 'digit', digit: posDigit, pos };
     if (tab === 'multi') {
       if (multiMode === 'pos') {
-        if (bai.length === 0 || shi.length === 0 || ge.length === 0)
-          return { kind: 'set', codes: new Set() };
-        const codes = new Set<string>();
-        for (const a of bai) for (const b of shi) for (const c of ge) codes.add(`${a}${b}${c}`);
-        return { kind: 'set', codes };
+        if (posSlots.some((s) => s.arr.length === 0)) return { kind: 'set', codes: new Set() };
+        // 按位置做笛卡尔积：3 位 → 百十百；5 位 → 万千百十全
+        let codes: string[] = [''];
+        for (const s of posSlots) {
+          const next: string[] = [];
+          for (const prefix of codes) for (const d of s.arr) next.push(prefix + String(d));
+          codes = next;
+        }
+        return { kind: 'set', codes: new Set(codes) };
       } else {
         // 不定位复式：每位从 noposNums 里选，可重复
         if (noposNums.length === 0) return { kind: 'set', codes: new Set() };
@@ -472,7 +496,7 @@ export default function AnalyzeScreen() {
     if (tab === 'amp') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     return { kind: 'set', codes: new Set() };
   }, [tab, type, externalCodes, shapeMainMode, shapeFilters, shapeDigits, dan, commonDigit, commonMode, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
-    bai, shi, ge, multiMode, noposNums, hejiKey, hejiValue]);
+    bai, shi, ge, wan, qian, posSlots, multiMode, noposNums, hejiKey, hejiValue]);
 
   const codesCount = useMemo(() => {
     if (target.kind === 'set') return target.codes.size;
@@ -1200,9 +1224,9 @@ export default function AnalyzeScreen() {
 
       {multiMode === 'pos' ? (
         <>
-          {renderDigitRow('百位', bai, setBai)}
-          {renderDigitRow('十位', shi, setShi)}
-          {renderDigitRow('个位', ge, setGe)}
+          {posSlots.map((s) => (
+            <View key={s.key}>{renderDigitRow(s.label, s.arr, s.setArr)}</View>
+          ))}
         </>
       ) : (
         renderDigitRow('号码', noposNums, setNoposNums)
@@ -1663,12 +1687,12 @@ export default function AnalyzeScreen() {
               meta={`≤ ${ampMax}`}
             >
               {rawData && (
-                <SkiaRawChart
+                <EChartsRawChart
                   data={rawData}
                   height={Math.max(chartSize.h, availH - 8)}
                   width={chartW}
                   title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
-                  highlightValue={ampMax}
+                  yMax={ampMax}
                 />
               )}
             </ChartCard>
