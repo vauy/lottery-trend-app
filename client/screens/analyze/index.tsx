@@ -22,7 +22,7 @@ import { Screen } from '@/components/Screen';
 import { EChartsFreqKChart } from '@/components/charts/EChartsFreqKChart';
 import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
-// 注：原 SkiaRawChart 已改用 EChartsRawChart，
+// 注：原 Skia 版原始值走势图已改用 EChartsRawChart（WebView 渲染），
 // 以保证 App 可在 Expo Go（Termux 热更新）运行，不依赖自定义原生模块。
 import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
 import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
