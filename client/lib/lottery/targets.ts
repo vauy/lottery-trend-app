@@ -172,7 +172,8 @@ export type Target =
   | { kind: 'set'; codes: Set<string> }
   | { kind: 'kl8Combo'; codes: number[]; matchMode: Kl8MatchMode; matchCount?: number }
   | { kind: 'kl8Dantuo'; dan: number[]; tuo: number[]; danCounts: number[]; tuoCounts: number[] }
-  | { kind: 'kl8Fushi'; codes: number[]; playSize: number };
+  | { kind: 'kl8Fushi'; codes: number[]; playSize: number }
+  | { kind: 'shapeSet'; codes: Set<string>; shapeLabel: string };
 
 // ==================== 命中判定 ====================
 
@@ -286,6 +287,10 @@ export function isHit(record: DrawRecord, target: Target, prevRecord?: DrawRecor
       for (const n of nums) if (codeSet.has(n)) hit += 1;
       return hit >= target.playSize;
     }
+    case 'shapeSet': {
+      const sorted = [...nums].sort((a, b) => a - b).join('');
+      return target.codes.has(sorted);
+    }
   }
 }
 
@@ -391,6 +396,17 @@ export function getProbability(
       }
       return p;
     }
+    case 'shapeSet': {
+      // 统计集合覆盖的直选号码数
+      let covered = 0;
+      for (const code of target.codes) {
+        const uniq = new Set(code).size;
+        if (uniq === 1) covered += 1;      // 豹子
+        else if (uniq === 2) covered += 3; // 组三
+        else covered += 6;                 // 组六
+      }
+      return covered / Math.pow(V, D);
+    }
   }
 }
 
@@ -479,6 +495,9 @@ export function getTargetLabel(target: Target): string {
       const codes = target.codes.map((c) => String(c).padStart(2, '0')).join(' ');
       return `选${target.playSize} 复式 · ${codes}`;
     }
+    case 'shapeSet': {
+      return `${target.shapeLabel} · ${target.codes.size} 注`;
+    }
   }
 }
 
@@ -504,6 +523,8 @@ export function getTargetShortLabel(target: Target): string {
       return `胆${target.danCounts.length}档 拖${target.tuoCounts.length}档`;
     case 'kl8Fushi':
       return `选${target.playSize}${target.codes.length}复式`;
+    case 'shapeSet':
+      return `${target.shapeLabel}${target.codes.size}注`;
   }
 }
 
@@ -562,4 +583,56 @@ export function buildRawSeries(
     out.push({ issue: records[i].issue, value: v });
   }
   return out;
+}
+
+
+export type ShapeMainMode = 'zhixuan' | 'zuxuan';
+export type ShapeFilter = 'zusan' | 'zuliu';
+export type ShapeMode = ShapeMainMode | ShapeFilter;
+
+/**
+ * 按形态生成号码集合（字符串数组，如 ['223','232',...]）
+ *   zhixuan: 全部 1000 注（默认，不筛选）
+ *   zuxuan:  组三 + 组六（去重形式），约 270 注
+ *   zusan:   组三（有对子），90 种组合 × 3 位置 = 270 注（直选展开）
+ *   zuliu:   组六（三不同），120 种组合 × 6 位置 = 720 注（直选展开）
+ *
+ * digits 为空时用全 0-9；有值时只在 digits 内组合。
+ */
+export function buildShapeCodes(
+  digits: number[],
+  mainMode: ShapeMainMode,
+  shapeFilters: ShapeFilter[],
+): string[] {
+  const out = new Set<string>();
+  const S = new Set(digits);
+  const n = digits.length;
+  const shapeActive = shapeFilters.length > 0;
+  const allowZusan = !shapeActive || shapeFilters.includes('zusan');
+  const allowZuliu = !shapeActive || shapeFilters.includes('zuliu');
+  const allowLeopard = !shapeActive;
+
+  for (let a = 0; a <= 9; a += 1)
+    for (let b = a; b <= 9; b += 1)
+      for (let c = b; c <= 9; c += 1) {
+        const nums = [a, b, c];
+        const uniq = new Set(nums).size;
+
+        if (uniq === 1 && !allowLeopard) continue;
+        if (uniq === 2 && !allowZusan) continue;
+        if (uniq === 3 && !allowZuliu) continue;
+
+        if (n > 0) {
+          if (n <= 3) {
+            if (!digits.every((d) => nums.includes(d))) continue;
+          } else {
+            if (!nums.every((d) => S.has(d))) continue;
+          }
+        }
+
+        // 统一返回组选形式（排序后）
+        out.add(`${a}${b}${c}`);
+      }
+
+  return [...out];
 }

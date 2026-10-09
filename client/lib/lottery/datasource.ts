@@ -11,6 +11,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FC3D_SEED, type SeedDraw } from './seed';
 import type { DrawRecord } from './types';
+import {
+  getAllDraws,
+  upsertDraws,
+  countDraws,
+  backupDraws,
+  restoreBackupDraws,
+  dropBackupDraws,
+  addConflict,
+  countConflicts,
+} from './db';
 
 export type DataSource = 'network' | 'cache' | 'seed';
 
@@ -52,20 +62,33 @@ export async function fetchFullHistory(gameId: string): Promise<DrawRecord[]> {
   if (!fileName) {
     throw new Error(`未配置的数据源：${gameId}`);
   }
-  const url = `${BASE_URL}/${fileName}`;
-  const resp = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
-      Accept: 'text/plain, */*',
-    },
-  });
-  if (!resp.ok) {
-    throw new Error(`17500 HTTP ${resp.status}`);
+
+  // 首选：17500
+  try {
+    const url = `${BASE_URL}/${fileName}`;
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+        Accept: 'text/plain, */*',
+      },
+    });
+    if (resp.ok) {
+      const text = await resp.text();
+      const parsed = parse17500Text(text);
+      if (parsed.length > 100) return parsed;
+    }
+  } catch {
+    // 17500 失败，走备用
   }
-  const text = await resp.text();
-  return parse17500Text(text);
+
+  // 备用：福彩3D 走中彩网
+  if (gameId === 'fc3d') {
+    return fetch3dFromCwl();
+  }
+
+  throw new Error('所有数据源均不可用');
 }
 
 /**
@@ -74,12 +97,44 @@ export async function fetchFullHistory(gameId: string): Promise<DrawRecord[]> {
  */
 
 
+/** 中彩网 3D API */
+const CWL_3D_API = 'https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=3d&issueCount=100';
+
+/** 从中彩网抓取 3D 历史（正序） */
+export async function fetch3dFromCwl(count = 100): Promise<DrawRecord[]> {
+  const url = `https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=3d&issueCount=${count}`;
+  const resp = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+      Accept: 'application/json, */*',
+      Referer: 'https://www.cwl.gov.cn/ygkj/wqkjgg/',
+    },
+  });
+  if (!resp.ok) throw new Error(`中彩网 3D HTTP ${resp.status}`);
+  const json: any = await resp.json();
+  const list: any[] = json?.result ?? [];
+  return list
+    .map((r) => ({
+      issue: String(r.code ?? ''),
+      date: String(r.date ?? '').split('(')[0],
+      nums: String(r.red ?? '')
+        .split(',')
+        .map((x) => parseInt(x, 10))
+        .filter((n) => Number.isFinite(n)),
+    }))
+    .filter((r) => r.nums.length === 3)
+    .reverse();
+}
+
 /** 中彩网快乐8 API */
 const KL8_API = 'https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=kl8&issueCount=2000';
 
 /** 抓取快乐8 全量历史（正序，最多 2000 期） */
-export async function fetchKl8History(): Promise<DrawRecord[]> {
-  const resp = await fetch(KL8_API, {
+export async function fetchKl8History(count = 2000): Promise<DrawRecord[]> {
+  const url = `https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=kl8&issueCount=${count}`;
+  const resp = await fetch(url, {
     method: 'GET',
     headers: {
       'User-Agent':
@@ -180,29 +235,42 @@ export async function loadHistory(
   count: number,
   opts: { forceRefresh?: boolean } = {},
 ): Promise<HistoryResult> {
-  const cached = await readCache(gameId);
-
-  if (!opts.forceRefresh && cached) {
-    const age = Date.now() - cached.ts;
-    if (age < CACHE_TTL_MS) {
-      return { records: cached.records.slice(-count), allRecords: cached.records, source: 'cache' };
+  // 1) 优先读 SQLite（永久保留）
+  try {
+    const dbRecords = await getAllDraws(gameId);
+    if (dbRecords.length > 0 && !opts.forceRefresh) {
+      if (dbRecords.length < count) {
+        // 不够用，后台补拉
+        void refreshInBackground(gameId);
+      }
+      return {
+        records: dbRecords.slice(-count),
+        allRecords: dbRecords,
+        source: 'cache',
+      };
     }
-    // 缓存过期，后台刷新，先用旧的
-    void refreshInBackground(gameId);
-    return { records: cached.records.slice(-count), allRecords: cached.records, source: 'cache' };
+  } catch {
+    // SQLite 失败就继续走网络
   }
 
-  // 强制刷新 或 无缓存
+  // 2) 网络拉全量
   try {
     const full = await fetchFullHistory(gameId);
-    await writeCache(gameId, full);
+    try { await upsertDraws(gameId, full, 'primary', false); } catch {}
     return { records: full.slice(-count), allRecords: full, source: 'network' };
   } catch {
-    // 有旧缓存用旧缓存
-    if (cached) {
-      return { records: cached.records.slice(-count), allRecords: cached.records, source: 'cache' };
-    }
-    // 完全兜底种子
+    // 3) 网络失败 → SQLite 兜底（即使 forceRefresh 也返回旧数据）
+    try {
+      const dbRecords = await getAllDraws(gameId);
+      if (dbRecords.length > 0) {
+        return {
+          records: dbRecords.slice(-count),
+          allRecords: dbRecords,
+          source: 'cache',
+        };
+      }
+    } catch {}
+    // 4) 完全兜底种子
     const seed = getSeed();
     return { records: seed.slice(-count), allRecords: seed, source: 'seed' };
   }
@@ -211,15 +279,194 @@ export async function loadHistory(
 async function refreshInBackground(gameId: string): Promise<void> {
   try {
     const full = await fetchFullHistory(gameId);
+    try { await upsertDraws(gameId, full, 'primary', false); } catch {}
     await writeCache(gameId, full);
   } catch {
     // 静默失败
   }
 }
 
+/**
+ * 增量刷新：
+ *   - fc3d / kl8 走中彩网 API 拉最近 N 期（秒级）
+ *   - pl3 / pl5 没有官方增量接口，降级为 17500 全量
+ */
 export async function refreshHistory(
   gameId: string,
   count: number,
 ): Promise<HistoryResult> {
+  // 优先尝试增量
+  try {
+    let fresh: DrawRecord[] = [];
+    if (gameId === 'fc3d') {
+      fresh = await fetch3dFromCwl(100);
+    } else if (gameId === 'kl8') {
+      fresh = await fetchKl8History(100);
+    }
+    if (fresh.length > 0) {
+      await upsertDraws(gameId, fresh, 'cwl', true);
+      const all = await getAllDraws(gameId);
+      if (all.length > 0) {
+        return {
+          records: all.slice(-count),
+          allRecords: all,
+          source: 'network',
+        };
+      }
+    }
+  } catch {
+    // 增量失败，继续走全量
+  }
+  // 降级：全量
   return loadHistory(gameId, count, { forceRefresh: true });
+}
+
+
+/** 判断两条记录是否一致（期号 + 号码） */
+function sameDraw(a: DrawRecord, b: DrawRecord): boolean {
+  if (a.issue !== b.issue) return false;
+  if (a.nums.length !== b.nums.length) return false;
+  for (let i = 0; i < a.nums.length; i += 1) {
+    if (a.nums[i] !== b.nums[i]) return false;
+  }
+  return true;
+}
+
+export interface VerifyStats {
+  total: number;       // 库里的总条数
+  fromPrimary: number; // 主源拉取条数
+  fromBackup: number;  // 备源对比条数
+  conflicts: number;   // 冲突期数
+  verified: number;    // 校验通过的期数
+}
+
+/**
+ * 全量数据：备份 → 拉全量 → 双源校验 → 写库
+ * 失败自动回滚
+ */
+export async function fetchAllAndVerify(
+  gameId: string,
+  onProgress?: (msg: string) => void,
+): Promise<VerifyStats> {
+  const stats: VerifyStats = { total: 0, fromPrimary: 0, fromBackup: 0, conflicts: 0, verified: 0 };
+  onProgress?.('备份现有数据…');
+  await backupDraws(gameId);
+
+  try {
+    onProgress?.('从主源拉取全量…');
+    const primary = await fetchFullHistory(gameId);
+    stats.fromPrimary = primary.length;
+    if (primary.length === 0) throw new Error('主源无数据');
+
+    // 双源对比：只对支持的彩种
+    let backup: DrawRecord[] = [];
+    if (gameId === 'fc3d') {
+      onProgress?.('从中彩网拉取对比数据…');
+      try { backup = await fetch3dFromCwl(100); } catch {}
+    }
+    stats.fromBackup = backup.length;
+
+    // 建立 index
+    const backupMap = new Map<string, DrawRecord>();
+    for (const r of backup) backupMap.set(r.issue, r);
+
+    // 逐期对比 + 标记
+    const merged: DrawRecord[] = [];
+    const verifiedIssues = new Set<string>();
+    for (const r of primary) {
+      const b = backupMap.get(r.issue);
+      if (b) {
+        if (sameDraw(r, b)) {
+          verifiedIssues.add(r.issue);
+        } else {
+          // 冲突：记入 conflicts 表
+          await addConflict(gameId, r.issue, r.nums, b.nums, 'primary', 'cwl');
+          stats.conflicts += 1;
+        }
+      }
+      merged.push(r);
+    }
+    stats.verified = verifiedIssues.size;
+
+    // 写库
+    onProgress?.('写入数据库…');
+    await upsertDraws(gameId, merged, 'primary', false);
+    // 校验通过的标记 verified=1
+    for (const issue of verifiedIssues) {
+      // 直接用 upsert 再写一遍会重置 verified 逻辑，需要单独 update
+      // 简化：把 verified 期分成一个子集，一次性 upsert
+    }
+    // 批量标记 verified
+    if (verifiedIssues.size > 0) {
+      await upsertDraws(
+        gameId,
+        merged.filter((r) => verifiedIssues.has(r.issue)),
+        'primary',
+        true,
+      );
+    }
+
+    onProgress?.('清理备份…');
+    await dropBackupDraws(gameId);
+    stats.total = merged.length;
+    return stats;
+  } catch (e) {
+    onProgress?.('失败，回滚…');
+    try { await restoreBackupDraws(gameId); } catch {}
+    throw e;
+  }
+}
+
+/**
+ * 校验数据：不重新拉全量，仅对本地已有的期做双源对比
+ */
+export async function verifyLocalData(
+  gameId: string,
+  onProgress?: (msg: string) => void,
+): Promise<{ checked: number; conflicts: number }> {
+  onProgress?.('读取本地数据…');
+  const local = await getAllDraws(gameId);
+  if (local.length === 0) {
+    return { checked: 0, conflicts: 0 };
+  }
+
+  let conflicts = 0;
+  let checked = 0;
+
+  if (gameId === 'fc3d') {
+    onProgress?.('从中彩网拉取对比数据…');
+    let remote: DrawRecord[] = [];
+    try { remote = await fetch3dFromCwl(100); } catch {}
+    const remoteMap = new Map<string, DrawRecord>();
+    for (const r of remote) remoteMap.set(r.issue, r);
+
+    onProgress?.('逐期对比…');
+    const verifiedIssues: string[] = [];
+    for (const r of local) {
+      const b = remoteMap.get(r.issue);
+      if (!b) continue;
+      checked += 1;
+      if (sameDraw(r, b)) {
+        verifiedIssues.push(r.issue);
+      } else {
+        await addConflict(gameId, r.issue, r.nums, b.nums, r.source || 'local', 'cwl');
+        conflicts += 1;
+      }
+    }
+    // 标记通过
+    if (verifiedIssues.length > 0) {
+      const set = new Set(verifiedIssues);
+      await upsertDraws(
+        gameId,
+        local.filter((r) => set.has(r.issue)),
+        'primary',
+        true,
+      );
+    }
+  } else {
+    // 无对比源，跳过
+    checked = 0;
+  }
+
+  return { checked, conflicts };
 }

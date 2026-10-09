@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -20,8 +21,9 @@ import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { OmissionChart } from '@/components/charts/OmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
 import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
-import { buildRawSeries, type Kl8Play } from '@/lib/lottery/targets';
+import { buildRawSeries, buildShapeCodes, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
+import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
 import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
 
@@ -160,10 +162,19 @@ export default function AnalyzeScreen() {
   const params = useLocalSearchParams<{ codes?: string }>();
 
   const [gameId, setGameId] = useState('fc3d');
+  const [tab, setTab] = useState<TabId>('dan');
+  const [shapeMainMode, setShapeMainMode] = useState<ShapeMainMode>('zhixuan');
+  const [shapeFilters, setShapeFilters] = useState<ShapeFilter[]>([]);
+  const [shapeDigits, setShapeDigits] = useState<number[]>([]);
   const game = useGame(gameId);
 
   const [countInput, setCountInput] = useState('500');
-  const [loadCount, setLoadCount] = useState(500);
+  const [countMap, setCountMap] = useState<Record<string, number>>({
+    common: 500, dan: 500, dantuo: 500, pos: 500, multi: 500,
+    heji: 500, amp: 80, random1: 500, random2: 500, group: 500,
+    combo: 200, fushi: 200, kl8seq: 200, kl8dt: 200,
+  });
+  const loadCount = countMap[tab] ?? 500;
 
   const { records, allRecords, loading, refreshing, error, source, refresh } = useLotteryHistory(
     game.id, loadCount,
@@ -177,7 +188,6 @@ export default function AnalyzeScreen() {
     }
   }, [loading, refresh]);
 
-  const [tab, setTab] = useState<TabId>('dan');
   const [externalCodes, setExternalCodes] = useState<Set<string> | null>(null);
   useEffect(() => {
     if (params.codes && typeof params.codes === 'string') {
@@ -227,12 +237,15 @@ export default function AnalyzeScreen() {
   const [noposNums, setNoposNums] = useState<number[]>([]);
   const [hejiKey, setHejiKey] = useState<string>('sum');
   const [ampKey, setAmpKey] = useState<string>('sumAmp');
+  const [ampMax, setAmpMax] = useState(9);
   const [hejiValue, setHejiValue] = useState(13);
   const [period, setPeriod] = useState(1);
   const [chartModes, setChartModes] = useState<ChartMode[]>(['freq']);
   const [compareTargets, setCompareTargets] = useState<Target[] | null>(null);
   const [topCollapsed, setTopCollapsed] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
+  const [dataTaskRunning, setDataTaskRunning] = useState(false);
+  const [dataTaskMsg, setDataTaskMsg] = useState('');
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
 
@@ -298,6 +311,27 @@ export default function AnalyzeScreen() {
   const kl8SeqCodes = kl8SeqOptions[kl8SeqIndex] ?? [];
 
   const target: Target = useMemo(() => {
+    // 形态模式：按 tab 提取数字，多选形态取并集
+    const shapeActive = shapeMainMode === 'zuxuan' || shapeFilters.length > 0;
+    if (shapeActive && (gameId === 'fc3d' || gameId === 'pl3')) {
+      let digitsForShape: number[] = [];
+      if (tab === 'dan') digitsForShape = dan;
+      else if (tab === 'dantuo') digitsForShape = [...new Set([...dtDan, ...dtTuo])];
+      else if (tab === 'common') digitsForShape = commonMode === 'digit' ? [commonDigit] : [];
+      else if (tab === 'pos') digitsForShape = [posDigit];
+      else if (tab === 'multi') {
+        digitsForShape = multiMode === 'pos'
+          ? [...new Set([...bai, ...shi, ...ge])]
+          : [...noposNums];
+      }
+      else digitsForShape = shapeDigits;
+      const codes = buildShapeCodes(digitsForShape, shapeMainMode, shapeFilters);
+      const parts: string[] = [shapeMainMode === 'zuxuan' ? '组选' : '直选'];
+      if (shapeFilters.length > 0) {
+        parts.push(shapeFilters.map((m) => m === 'zusan' ? '组三' : '组六').join('+'));
+      }
+      return { kind: 'shapeSet', codes: new Set(codes), shapeLabel: parts.join('·') };
+    }
     if (externalCodes && externalCodes.size > 0 && tab === 'dan')
       return { kind: 'set', codes: externalCodes };
     if (tab === 'fushi') {
@@ -376,7 +410,7 @@ export default function AnalyzeScreen() {
     if (tab === 'heji') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     if (tab === 'amp') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     return { kind: 'set', codes: new Set() };
-  }, [tab, type, externalCodes, commonDigit, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
+  }, [tab, type, externalCodes, shapeMainMode, shapeFilters, shapeDigits, dan, commonDigit, commonMode, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
     bai, shi, ge, multiMode, noposNums, hejiKey, hejiValue]);
 
   const codesCount = useMemo(() => {
@@ -433,8 +467,11 @@ export default function AnalyzeScreen() {
 
   const applyCount = () => {
     const n = parseInt(countInput, 10);
-    if (!Number.isNaN(n) && n >= 50 && n <= 10000) setLoadCount(n);
-    else setCountInput(String(loadCount));
+    if (!Number.isNaN(n) && n >= 50 && n <= 10000) {
+      setCountMap((prev) => ({ ...prev, [tab]: n }));
+    } else {
+      setCountInput(String(loadCount));
+    }
   };
 
   const toggleChart = (m: ChartMode) => {
@@ -468,6 +505,61 @@ export default function AnalyzeScreen() {
   });
 
   // ============ 行渲染 ============
+  const runFullFetch = () => {
+    Alert.alert(
+      '全量数据',
+      `将重新从主源拉取「${game.name}」全量数据，并与备源校验。\n\n已有数据会先备份，失败自动回滚。\n\n继续？`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '开始',
+          onPress: async () => {
+            setDataTaskRunning(true);
+            setDataTaskMsg('准备中…');
+            try {
+              const stats = await fetchAllAndVerify(game.id, (m) => setDataTaskMsg(m));
+              setDataTaskRunning(false);
+              Alert.alert(
+                '完成',
+                `总期数：${stats.total}\n主源：${stats.fromPrimary}\n备源：${stats.fromBackup}\n校验通过：${stats.verified}\n冲突：${stats.conflicts}`,
+              );
+              await refresh();
+            } catch (e) {
+              setDataTaskRunning(false);
+              Alert.alert('失败', e instanceof Error ? e.message : '未知错误');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const runVerify = () => {
+    Alert.alert(
+      '校验数据',
+      `对比本地「${game.name}」数据与远程备源，标记冲突期。\n\n继续？`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '开始',
+          onPress: async () => {
+            setDataTaskRunning(true);
+            setDataTaskMsg('准备中…');
+            try {
+              const r = await verifyLocalData(game.id, (m) => setDataTaskMsg(m));
+              setDataTaskRunning(false);
+              Alert.alert('完成', `对比期数：${r.checked}\n冲突：${r.conflicts}`);
+              await refresh();
+            } catch (e) {
+              setDataTaskRunning(false);
+              Alert.alert('失败', e instanceof Error ? e.message : '未知错误');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const renderTabBar = () => (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
       <Pressable
@@ -485,15 +577,56 @@ export default function AnalyzeScreen() {
       ).map((t) => (
         <Pressable key={t.id} onPress={() => {
                     setTab(t.id);
+                    setCountInput(String(countMap[t.id] ?? 500));
                     setCompareTargets(null);
-                    if (t.id === 'amp' && loadCount > 80) {
-                      setLoadCount(80);
-                      setCountInput('80');
+                    if (t.id === 'amp') {
+                      setCountInput(String(countMap.amp ?? 80));
                     }
                   }} style={btnStyle(tab === t.id)}>
           <Text style={txtColor(tab === t.id)}>{t.label}</Text>
         </Pressable>
       ))}
+{/* 形态按钮（仅 3D / 排列3） */}
+{(gameId === 'fc3d' || gameId === 'pl3') && (
+  <>
+    <Text style={{ fontSize: 9, color: '#888', marginLeft: 4 }}>形态</Text>
+    <Pressable
+      onPress={() => setShapeMainMode(shapeMainMode === 'zuxuan' ? 'zhixuan' : 'zuxuan')}
+      style={btnStyle(shapeMainMode === 'zuxuan')}>
+      <Text style={txtColor(shapeMainMode === 'zuxuan')}>组选</Text>
+    </Pressable>
+    {([
+      { id: 'zusan' as const, label: '组三' },
+      { id: 'zuliu' as const, label: '组六' },
+    ]).map((o) => (
+      <Pressable key={o.id}
+        onPress={() => setShapeFilters((prev) => prev.includes(o.id) ? prev.filter((x) => x !== o.id) : [...prev, o.id])}
+        style={btnStyle(shapeFilters.includes(o.id))}>
+        <Text style={txtColor(shapeFilters.includes(o.id))}>{o.label}</Text>
+      </Pressable>
+    ))}
+  </>
+)}
+      <TextInput
+        value={countInput}
+        onChangeText={setCountInput}
+        onEndEditing={applyCount}
+        onSubmitEditing={applyCount}
+        keyboardType="numeric"
+        style={{
+          width: 60, height: 22, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 4,
+          paddingHorizontal: 4, paddingVertical: 0, fontSize: 11, lineHeight: 14,
+          color: '#111827', textAlign: 'center', backgroundColor: '#ffffff',
+        }}
+        placeholderTextColor="#9ca3af"
+        placeholder="500"
+      />
+      <Pressable onPress={applyCount} style={btnStyle(true)}>
+        <Text style={txtColor(true)}>应用</Text>
+      </Pressable>
+      <Pressable onPress={() => void refresh()} disabled={refreshing} style={btnStyle(false)}>
+        <Text style={txtColor(false)}>{refreshing ? '刷新中…' : '刷新'}</Text>
+      </Pressable>
     </View>
   );
 
@@ -536,7 +669,7 @@ export default function AnalyzeScreen() {
   ) => (
     <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
       <Text style={{ fontSize: 9, color: '#888', width: 24 }}>{label}</Text>
-      {(type === 'pair' ? [0, 1, 2, 3, 4] : DIGITS).map((d) => (
+      {((tab === 'dan' || tab === 'dantuo') && type === 'pair' ? [0, 1, 2, 3, 4] : DIGITS).map((d) => (
         <Pressable
           key={`${label}-${d}`}
           onPress={() => toggle(arr, setArr, d)}
@@ -1049,26 +1182,6 @@ export default function AnalyzeScreen() {
             {commonMode === 'front2' && digitRow('前二和', 18, commonFront2, setCommonFront2)}
             {commonMode === 'back2' && digitRow('后二和', 18, commonBack2, setCommonBack2)}
           </View>
-          <TextInput
-            value={countInput}
-            onChangeText={setCountInput}
-            onEndEditing={applyCount}
-            onSubmitEditing={applyCount}
-            keyboardType="numeric"
-            style={{
-              width: 60, height: 24, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 4,
-              paddingHorizontal: 4, paddingVertical: 0, fontSize: 12, lineHeight: 16,
-              color: '#111827', textAlign: 'center', backgroundColor: '#ffffff',
-            }}
-            placeholderTextColor="#9ca3af"
-            placeholder="500"
-          />
-          <Pressable onPress={applyCount} style={btnStyle(true)}>
-            <Text style={txtColor(true)}>应用</Text>
-          </Pressable>
-          <Pressable onPress={() => void refresh()} disabled={refreshing} style={btnStyle(false)}>
-            <Text style={txtColor(false)}>{refreshing ? '刷新中…' : '刷新'}</Text>
-          </Pressable>
         </View>
       </>
     );
@@ -1244,7 +1357,6 @@ export default function AnalyzeScreen() {
 
   const renderHeji = () => renderHejiGeneric(HEJI_KEYS);
   const renderAmp = () => {
-    const meta = AMP_KEYS.find((k) => k.id === ampKey) ?? AMP_KEYS[0];
     return (
       <>
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
@@ -1259,7 +1371,14 @@ export default function AnalyzeScreen() {
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
           <Text style={{ fontSize: 9, color: '#888', width: 24 }}>值范围</Text>
-          <Text style={{ fontSize: 11, color: '#111827' }}>0 - {meta.max}（自动）</Text>
+          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((v) => (
+            <Pressable key={v}
+              onPress={() => setAmpMax(v)}
+              style={btnStyle(ampMax === v)}>
+              <Text style={txtColor(ampMax === v)}>{v}</Text>
+            </Pressable>
+          ))}
+          <Text style={{ fontSize: 9, color: '#888', marginLeft: 6 }}>≤ {ampMax}</Text>
         </View>
       </>
     );
@@ -1397,7 +1516,7 @@ export default function AnalyzeScreen() {
         ) : (
           <>
             {renderTabBar()}
-            {tab === 'dan' && renderTypeRow()}
+            {(tab === 'dan' || tab === 'dantuo') && renderTypeRow()}
             {tab === 'kl8dt' && renderKl8Dt()}
             {tab === 'kl8seq' && renderKl8Seq()}
             {tab === 'combo' && renderCombo()}
@@ -1442,8 +1561,34 @@ export default function AnalyzeScreen() {
                   </Text>
                 </Pressable>
               ))}
+              <View style={{ height: 1, backgroundColor: '#e5e7eb', marginVertical: 6 }} />
+              <Pressable
+                onPress={() => { setGameMenuOpen(false); void runFullFetch(); }}
+                style={{ paddingVertical: 10, paddingHorizontal: 16 }}
+              >
+                <Text style={{ fontSize: 13, color: '#059669', fontWeight: '700' }}>全量数据</Text>
+                <Text style={{ fontSize: 10, color: '#6b7280' }}>重新拉取并多源校验</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { setGameMenuOpen(false); void runVerify(); }}
+                style={{ paddingVertical: 10, paddingHorizontal: 16 }}
+              >
+                <Text style={{ fontSize: 13, color: '#7c3aed', fontWeight: '700' }}>校验数据</Text>
+                <Text style={{ fontSize: 10, color: '#6b7280' }}>对比本地与远程，标记冲突</Text>
+              </Pressable>
             </View>
           </Pressable>
+        </Modal>
+
+        {/* 数据任务进度 Modal */}
+        <Modal visible={dataTaskRunning} transparent animationType="fade" onRequestClose={() => {}}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 24, alignItems: 'center', minWidth: 220 }}>
+              <ActivityIndicator size="large" color="#2563eb" />
+              <Text style={{ fontSize: 13, color: '#111827', marginTop: 12, fontWeight: '700' }}>处理中…</Text>
+              <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 6, textAlign: 'center' }}>{dataTaskMsg}</Text>
+            </View>
+          </View>
         </Modal>
 
         {/* 周期选择 Modal */}
