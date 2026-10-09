@@ -8,17 +8,30 @@ import { View, Text, ScrollView, useWindowDimensions } from 'react-native';
 import Svg, { Line, Path as SvgPath, Circle, Text as SvgText } from 'react-native-svg';
 import type { TrendPoint } from '@/lib/lottery/types';
 import { scaleLinear, buildLinePath, niceMax } from './chartUtils';
+import { palette, semantic } from '@/lib/theme';
 
-const RED = '#e5484d';
-const GREEN = '#22c55e';
-const BLACK = '#1f2937';
-const MAX_COLOR = '#ef4444';
-const AVG_COLOR = '#3b82f6';
-const MA5 = '#3b82f6';
-const MA10 = '#22c55e';
-const MA20 = '#e879f9';
-const AXIS_COLOR = 'rgba(140,140,150,0.35)';
-const LABEL_COLOR = '#8a8f98';
+/** 遗漏值球 / 历史最大线（热） */
+const RED = semantic.hot;
+/** 开出球（遗漏 0） */
+const GREEN = palette.accent;
+/** 主折线 */
+const MAIN_LINE = palette.accent;
+/** 理论遗漏参考线 */
+const THEORY_COLOR = palette.inkDim;
+/** 历史最大线（虚线） */
+const MAX_COLOR = semantic.hot;
+/** 平均线（虚线） */
+const AVG_COLOR = semantic.cold;
+/** 均线：MA5 = amber（原型）/ MA10 = red / MA20 = cyan（原型） */
+const MA5 = palette.amber;
+const MA10 = semantic.hot;
+const MA20 = semantic.cold;
+/** 网格线 / 坐标轴线 */
+const AXIS_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
+/** 标题文字 */
+const LABEL_COLOR = palette.inkDim;
 
 export function OmissionLineChart({
   points,
@@ -95,7 +108,7 @@ export function OmissionLineChart({
             return (
               <React.Fragment key={`g-${r}`}>
                 <Line x1={pad.left} y1={y} x2={chartWidth - pad.right} y2={y} stroke={AXIS_COLOR} strokeWidth={1} />
-                <SvgText x={pad.left - 4} y={y + 3} fontSize={8} fill={LABEL_COLOR} textAnchor="end">
+                <SvgText x={pad.left - 4} y={y + 3} fontSize={8} fill={TICK_COLOR} textAnchor="end">
                   {(displayMax * r).toFixed(1)}
                 </SvgText>
               </React.Fragment>
@@ -109,7 +122,7 @@ export function OmissionLineChart({
               y1={yScale(theoryMiss)}
               x2={chartWidth - pad.right}
               y2={yScale(theoryMiss)}
-              stroke={BLACK}
+              stroke={THEORY_COLOR}
               strokeWidth={1.2}
             />
           )}
@@ -135,7 +148,7 @@ export function OmissionLineChart({
           {/* 折线 */}
           <SvgPath
             d={buildLinePath(missValues.map((v, i) => ({ x: xFor(i), y: yScale(v) })))}
-            stroke={BLACK}
+            stroke={MAIN_LINE}
             strokeWidth={1.2}
             fill="none"
           />
@@ -209,7 +222,7 @@ export function OmissionLineChart({
                 x={xFor(i)}
                 y={totalHeight - 8}
                 fontSize={8}
-                fill={LABEL_COLOR}
+                fill={TICK_COLOR}
                 textAnchor="middle"
               >
                 {p.issue.slice(-3)}

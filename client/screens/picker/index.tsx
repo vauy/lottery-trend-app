@@ -1,12 +1,31 @@
 /**
  * 选号页 —— 基于冷温热的智能胆码推荐 + 号码生成工具。
  * 生成结果仅作娱乐参考，不构成投注建议。
+ * 视觉对齐 prototype/：深色 shell + Panel / Field / Segmented / Chip / CodePill / BottomBar。
  */
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
 import { useLotteryAnalysis, useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { calcSpan, calcSum } from '@/lib/lottery/analysis';
+import {
+  BottomBar,
+  Chip,
+  CodePill,
+  Field,
+  Panel,
+  Segmented,
+  StatPill,
+} from '@/components/ui/Kit';
+import { alpha, fontSize as fs, palette, radius, semantic, space } from '@/lib/theme';
 
 type Strategy = 'hot' | 'cold' | 'mix' | 'random';
 
@@ -19,10 +38,20 @@ const STRATEGIES: { id: Strategy; name: string; desc: string }[] = [
 
 const GEN_COUNTS = [5, 10, 20];
 
+const POOL_COLOR = {
+  hot: semantic.hot,
+  warm: palette.amber,
+  cold: semantic.cold,
+} as const;
+
 export default function PickerScreen() {
   const game = useGame('fc3d');
   const { records, loading, error } = useLotteryHistory(game.id, 120);
   const { stats, coldWarmHot } = useLotteryAnalysis(game, records, 10);
+
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const isLandscape = screenW > screenH;
+  const insets = useSafeAreaInsets();
 
   const [strategy, setStrategy] = useState<Strategy>('mix');
   const [genCount, setGenCount] = useState(10);
@@ -61,153 +90,157 @@ export default function PickerScreen() {
     setResults(out);
   };
 
+  // 遗漏 Top5
+  const topOmission = useMemo(
+    () => [...stats].sort((a, b) => b.omission - a.omission).slice(0, 5),
+    [stats],
+  );
+
+  const strategyDesc = STRATEGIES.find((s) => s.id === strategy)?.desc ?? '';
+
+  const bar = (
+    <BottomBar
+      vertical={isLandscape}
+      ghostLabel="清空"
+      onGhost={() => setResults([])}
+      primaryLabel="生成号码"
+      onPrimary={generate}
+      hint="免责声明：号码由随机算法生成，仅供娱乐参考，不构成任何投注建议。彩票开奖为独立随机事件，请理性购彩、量力而行。"
+    />
+  );
+
   return (
-    <Screen safeAreaEdges={['top', 'left', 'right']}>
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
-        <Text className="text-xl font-bold text-foreground mb-1">智能选号</Text>
-        <Text className="text-xs text-muted mb-4">
-          基于冷温热与遗漏的号码参考 · 仅作娱乐，理性对待
-        </Text>
-
-        {loading ? (
-          <View className="items-center py-20">
-            <ActivityIndicator />
-          </View>
-        ) : error ? (
-          <View className="items-center py-20">
-            <Text className="text-danger">加载失败：{error}</Text>
-          </View>
-        ) : (
-          <>
-            {/* 冷温热参考 */}
-            <View className="bg-white rounded-xl border border-border p-4 mb-4">
-              <Text className="text-sm font-semibold text-foreground mb-3">冷温热参考（近10期）</Text>
-              <PoolRow label="热码" nums={coldWarmHot.hot} color="#ef4444" />
-              <PoolRow label="温码" nums={coldWarmHot.warm} color="#f59e0b" />
-              <PoolRow label="冷码" nums={coldWarmHot.cold} color="#3b82f6" />
+    <Screen
+      safeAreaEdges={['top', 'left', 'right']}
+      backgroundColor={semantic.pageBg}
+      statusBarStyle="light"
+    >
+      <View style={styles.root}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 品牌栏 */}
+          <View style={styles.brand}>
+            <View style={styles.logo}>
+              <Text style={styles.logoText}>奇</Text>
             </View>
-
-            {/* 遗漏 Top */}
-            <View className="bg-white rounded-xl border border-border p-4 mb-4">
-              <Text className="text-sm font-semibold text-foreground mb-3">遗漏观察</Text>
-              <View className="flex-row flex-wrap gap-2">
-                {[...stats]
-                  .sort((a, b) => b.omission - a.omission)
-                  .slice(0, 5)
-                  .map((s) => (
-                    <View key={s.digit} className="flex-row items-center gap-1.5 bg-surface-secondary rounded-lg px-2.5 py-1.5">
-                      <Text className="text-sm font-bold text-foreground">{s.digit}</Text>
-                      <Text className="text-xs text-muted">遗漏{s.omission}</Text>
-                    </View>
-                  ))}
-              </View>
+            <View style={styles.brandText}>
+              <Text style={styles.h1}>智能选号</Text>
+              <Text style={styles.sub}>PICKER · 冷温热与遗漏</Text>
             </View>
-
-            {/* 选号策略 */}
-            <View className="bg-white rounded-xl border border-border p-4 mb-4">
-              <Text className="text-sm font-semibold text-foreground mb-3">选号策略</Text>
-              <View className="flex-row flex-wrap gap-2">
-                {STRATEGIES.map((s) => (
-                  <Pressable
-                    key={s.id}
-                    onPress={() => setStrategy(s.id)}
-                    className={`px-3 py-2 rounded-lg border ${
-                      strategy === s.id ? 'bg-accent border-accent' : 'bg-white border-border'
-                    }`}
-                  >
-                    <Text
-                      className={`text-sm font-semibold ${
-                        strategy === s.id ? 'text-accent-foreground' : 'text-foreground'
-                      }`}
-                    >
-                      {s.name}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text className="text-xs text-muted mt-2">
-                {STRATEGIES.find((s) => s.id === strategy)?.desc}
+            <StatPill>
+              <Text style={styles.pillText}>
+                号码池 <Text style={styles.pillValue}>{pool.length}</Text>
               </Text>
-            </View>
+            </StatPill>
+          </View>
 
-            {/* 生成数量 + 按钮 */}
-            <View className="bg-white rounded-xl border border-border p-4 mb-4">
-              <Text className="text-sm font-semibold text-foreground mb-3">生成数量</Text>
-              <View className="flex-row gap-2 mb-4">
-                {GEN_COUNTS.map((c) => (
-                  <Pressable
-                    key={c}
-                    onPress={() => setGenCount(c)}
-                    className={`flex-1 py-2 rounded-lg border ${
-                      genCount === c ? 'bg-accent border-accent' : 'bg-white border-border'
-                    }`}
-                  >
-                    <Text
-                      className={`text-center text-sm font-semibold ${
-                        genCount === c ? 'text-accent-foreground' : 'text-foreground'
-                      }`}
-                    >
-                      {c} 注
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Pressable className="bg-accent rounded-lg py-3 items-center" onPress={generate}>
-                <Text className="text-accent-foreground text-base font-bold">生成号码</Text>
-              </Pressable>
+          {loading ? (
+            <View style={styles.state}>
+              <ActivityIndicator color={semantic.brand} />
             </View>
+          ) : error ? (
+            <View style={styles.state}>
+              <Text style={styles.stateError}>加载失败：{error}</Text>
+            </View>
+          ) : (
+            <View style={[styles.body, isLandscape && styles.bodyRow]}>
+              {/* 左栏：参考 + 参数 */}
+              <View style={[styles.col, isLandscape && styles.colSide]}>
+                <Panel label="冷温热参考（近10期）">
+                  <PoolRow label="热码" nums={coldWarmHot.hot} color={POOL_COLOR.hot} />
+                  <PoolRow label="温码" nums={coldWarmHot.warm} color={POOL_COLOR.warm} />
+                  <PoolRow label="冷码" nums={coldWarmHot.cold} color={POOL_COLOR.cold} />
+                </Panel>
 
-            {/* 结果 */}
-            {results.length > 0 && (
-              <View className="bg-white rounded-xl border border-border p-4">
-                <Text className="text-sm font-semibold text-foreground mb-3">
-                  生成结果（{results.length} 注）
-                </Text>
-                <View className="flex-row flex-wrap gap-2">
-                  {results.map((nums, i) => (
-                    <View
-                      key={i}
-                      className="bg-surface-secondary rounded-lg px-3 py-2 items-center"
-                      style={{ minWidth: 92 }}
-                    >
-                      <View className="flex-row gap-1 mb-1">
-                        {nums.map((n, j) => (
-                          <View key={j} className="w-6 h-6 bg-accent rounded items-center justify-center">
-                            <Text className="text-white text-xs font-bold">{n}</Text>
-                          </View>
-                        ))}
+                <Panel label="遗漏观察">
+                  <View style={styles.pillWrap}>
+                    {topOmission.map((s) => (
+                      <View key={s.digit} style={styles.pillItem}>
+                        <CodePill code={String(s.digit)} />
+                        <Text style={styles.pillMeta}>遗漏{s.omission}</Text>
                       </View>
-                      <Text className="text-[10px] text-muted">
-                        和{calcSum(nums)} 跨{calcSpan(nums)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            )}
+                    ))}
+                  </View>
+                </Panel>
 
-            <Text className="text-[10px] text-muted text-center mt-5 leading-4">
-              免责声明：号码由随机算法生成，仅供娱乐参考，不构成任何投注建议。
-              {'\n'}彩票开奖为独立随机事件，请理性购彩、量力而行。
-            </Text>
-          </>
+                <Panel
+                  label="选号策略"
+                  right={<Text style={styles.panelMeta}>{game.name}</Text>}
+                >
+                  <Field>
+                    <Segmented<Strategy>
+                      options={STRATEGIES.map((s) => ({ value: s.id, label: s.name }))}
+                      value={strategy}
+                      onChange={setStrategy}
+                    />
+                  </Field>
+                  <Text style={styles.hint}>{strategyDesc}</Text>
+                </Panel>
+
+                <Panel label="生成数量">
+                  <Field>
+                    <View style={styles.chipRow}>
+                      {GEN_COUNTS.map((c) => (
+                        <Chip
+                          key={c}
+                          label={`${c} 注`}
+                          active={genCount === c}
+                          onPress={() => setGenCount(c)}
+                        />
+                      ))}
+                    </View>
+                  </Field>
+                </Panel>
+
+                {isLandscape ? bar : null}
+              </View>
+
+              {/* 右栏：结果 */}
+              <View style={styles.col}>
+                {results.length > 0 ? (
+                  <Panel label={`生成结果（${results.length} 注）`}>
+                    <View style={styles.pillWrap}>
+                      {results.map((nums, i) => (
+                        <View key={i} style={styles.pillItem}>
+                          <CodePill code={nums.join('')} />
+                          <Text style={styles.pillMeta}>
+                            和{calcSum(nums)} 跨{calcSpan(nums)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </Panel>
+                ) : null}
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {isLandscape ? null : (
+          <View style={{ paddingBottom: insets.bottom }}>{bar}</View>
         )}
-      </ScrollView>
+      </View>
     </Screen>
   );
 }
 
 function PoolRow({ label, nums, color }: { label: string; nums: number[]; color: string }) {
   return (
-    <View className="flex-row items-center mt-2">
-      <Text className="text-sm font-semibold w-12" style={{ color }}>{label}</Text>
-      <View className="flex-row gap-1.5 flex-1">
+    <View style={styles.poolRow}>
+      <Text style={[styles.poolLabel, { color }]}>{label}</Text>
+      <View style={styles.poolNums}>
         {nums.length === 0 ? (
-          <Text className="text-muted text-sm">（无）</Text>
+          <Text style={styles.poolEmpty}>（无）</Text>
         ) : (
           nums.map((n) => (
-            <View key={n} className="w-7 h-7 rounded items-center justify-center" style={{ backgroundColor: color }}>
-              <Text className="text-white text-sm font-bold">{n}</Text>
+            <View
+              key={n}
+              style={[styles.poolDigit, { backgroundColor: alpha(color, 0.18) }]}
+            >
+              <Text style={[styles.poolDigitText, { color }]}>{n}</Text>
             </View>
           ))
         )}
@@ -215,3 +248,54 @@ function PoolRow({ label, nums, color }: { label: string; nums: number[]; color:
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: semantic.pageBg },
+  scrollView: { flex: 1 },
+  scroll: { padding: space.lg, paddingBottom: space.xl, gap: space.lg },
+
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logo: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.sm,
+    backgroundColor: semantic.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoText: { fontWeight: '800', color: semantic.onBrand, fontSize: fs.md },
+  brandText: { flex: 1 },
+  h1: { fontSize: fs.lg, fontWeight: '700', letterSpacing: 0.6, lineHeight: 20 },
+  sub: { fontSize: fs.micro, color: semantic.textFaint, letterSpacing: 1.6 },
+  pillText: { fontSize: fs.micro, color: semantic.textFaint },
+  pillValue: { color: palette.cyan, fontWeight: '600' },
+
+  body: { gap: space.lg },
+  bodyRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  col: { flex: 1, gap: space.lg },
+  colSide: { flex: 0, width: 320, maxWidth: '40%' },
+
+  panelMeta: { fontSize: fs.micro, color: semantic.textFaint },
+
+  state: { alignItems: 'center', paddingVertical: 80, gap: space.sm },
+  stateError: { fontSize: fs.sm, color: semantic.hot },
+
+  poolRow: { flexDirection: 'row', alignItems: 'center', marginTop: space.sm, gap: space.sm },
+  poolLabel: { fontSize: fs.sm, fontWeight: '600', width: 44 },
+  poolNums: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  poolEmpty: { fontSize: fs.sm, color: semantic.textFaint },
+  poolDigit: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  poolDigitText: { fontSize: fs.sm, fontWeight: '700' },
+
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  pillItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  pillMeta: { fontSize: fs.micro, color: semantic.textFaint },
+  hint: { fontSize: fs.xs, color: semantic.textDim },
+});

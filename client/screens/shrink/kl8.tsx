@@ -1,13 +1,33 @@
-import { View, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Screen } from '@/components/Screen';
+import { Legend, Panel } from '@/components/ui/Kit';
+import { fontSize as fs, semantic, space } from '@/lib/theme';
 
 export default function Kl8ShrinkScreen() {
   return (
-    <Screen safeAreaEdges={['top', 'left', 'right']}>
-      <View className="flex-1 items-center justify-center">
-        <Text className="text-lg font-bold text-foreground mb-2">快乐8 缩水</Text>
-        <Text className="text-sm text-muted">开发中，敬请期待</Text>
+    <Screen
+      safeAreaEdges={['top', 'left', 'right']}
+      backgroundColor={semantic.pageBg}
+      statusBarStyle="light"
+    >
+      <View style={styles.page}>
+        <Panel label="快乐8 · 缩水">
+          <Text style={styles.title}>快乐8 缩水</Text>
+          <Text style={styles.hint}>开发中，敬请期待</Text>
+          <Legend
+            items={[
+              { color: semantic.dan, label: '已选 / 胆码' },
+              { color: semantic.cold, label: '组选号码' },
+            ]}
+          />
+        </Panel>
       </View>
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  page: { flex: 1, backgroundColor: semantic.pageBg, padding: space.md },
+  title: { fontSize: fs.lg, fontWeight: '700', color: semantic.text, marginBottom: space.sm },
+  hint: { fontSize: fs.sm, color: semantic.textDim, marginBottom: space.md },
+});

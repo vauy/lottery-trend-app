@@ -15,14 +15,21 @@ import {
 } from '@shopify/react-native-skia';
 import type { TargetPoint } from '@/lib/lottery/targets';
 import { scaleLinear, buildLinePath } from './chartUtils';
+import { palette, semantic } from '@/lib/theme';
 
-const RED = '#e5484d';
-const CYAN = '#22d3ee';
-const BOLL_COLOR = '#7c9cf5';
-const MID_COLOR = '#fbbf24';
-const AXIS_COLOR = 'rgba(140,140,150,0.35)';
-const ZERO_COLOR = '#6b7280';
-const LABEL_COLOR = '#8a8f98';
+/** 涨 = 热（red）/ 跌 = 冷（cyan） */
+const UP = semantic.hot;
+const DOWN = semantic.cold;
+/** 布林带上下轨 = accent，中轨 = amber（原型 MA 线） */
+const BOLL_COLOR = palette.accent;
+const MID_COLOR = palette.amber;
+/** 网格线 / 坐标轴线 / 零轴 */
+const AXIS_COLOR = palette.line;
+const ZERO_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
+/** 标题文字 */
+const LABEL_COLOR = palette.inkDim;
 
 const COL_W = 6;
 const BODY_W = 4;
@@ -232,8 +239,8 @@ export function FreqKChart({
             {/* K 线实体 */}
             {points.map((p, i) => {
               const cx = xFor(i);
-              const isRed = p.c >= p.o;
-              const color = isRed ? RED : CYAN;
+              const isUp = p.c >= p.o;
+              const color = isUp ? UP : DOWN;
               const yO = yScale(p.o);
               const yC = yScale(p.c);
               const bodyTop = Math.min(yO, yC);
@@ -260,7 +267,7 @@ export function FreqKChart({
               />
             )}
             {bollMidPath && (
-              <SkPath path={bollMidPath} color={MID_COLOR} style="stroke" strokeWidth={1} />
+              <SkPath path={bollMidPath} color={MID_COLOR} style="stroke" strokeWidth={1.2} />
             )}
             {bollLowerPath && (
               <SkPath
@@ -284,7 +291,7 @@ export function FreqKChart({
                 width: pad.left - 2,
                 textAlign: 'right',
                 fontSize: fontTick,
-                color: LABEL_COLOR,
+                color: TICK_COLOR,
               }}
             >
               {v.toFixed(1)}
@@ -305,7 +312,7 @@ export function FreqKChart({
                   width: 40,
                   textAlign: 'center',
                   fontSize: fontTick,
-                  color: LABEL_COLOR,
+                  color: TICK_COLOR,
                 }}
               >
                 {p.issue.slice(-3)}

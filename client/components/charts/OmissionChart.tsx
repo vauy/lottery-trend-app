@@ -14,19 +14,34 @@ import {
   Skia,
 } from '@shopify/react-native-skia';
 import { scaleLinear, buildLinePath, niceMax } from './chartUtils';
+import { palette, semantic } from '@/lib/theme';
 
-const RED = '#e5484d';
-const GREEN = '#22c55e';
-const BLUE = '#2563eb';
-const PURPLE = '#8b5cf6';
-const BLACK = '#1f2937';
-const MAX_COLOR = '#ef4444';
-const AVG_COLOR = '#3b82f6';
-const MA5 = '#3b82f6';
-const MA10 = '#22c55e';
-const MA20 = '#e879f9';
-const AXIS_COLOR = 'rgba(140,140,150,0.35)';
-const LABEL_COLOR = '#8a8f98';
+/** 遗漏值球 / 历史最大线（热） */
+const RED = semantic.hot;
+/** 开出球（遗漏 0） */
+const GREEN = palette.accent;
+/** 当前期球 */
+const BLUE = semantic.cold;
+/** 虚拟 ? 球 */
+const PURPLE = semantic.dan;
+/** 主折线（一阶 / 二阶）+ 延伸线 */
+const MAIN_LINE = palette.accent;
+/** 理论遗漏参考线 */
+const THEORY_COLOR = palette.inkDim;
+/** 历史最大线（虚线） */
+const MAX_COLOR = semantic.hot;
+/** 平均线（虚线） */
+const AVG_COLOR = semantic.cold;
+/** 均线：MA5 = amber（原型）/ MA10 = red / MA20 = cyan（原型） */
+const MA5 = palette.amber;
+const MA10 = semantic.hot;
+const MA20 = semantic.cold;
+/** 网格线 / 坐标轴线 */
+const AXIS_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
+/** 标题文字 */
+const LABEL_COLOR = palette.inkDim;
 
 export type OmissionMetrics = {
   max: number;
@@ -210,10 +225,11 @@ export function OmissionChart({
             <Pressable
               key={r.label}
               onPress={() => setRangeIdx(idx)}
-              style={{ minWidth: 40 }}
-              className={`py-1 rounded border items-center ${
-                rangeIdx === idx ? 'bg-accent border-accent' : 'bg-white border-border'
-              }`}
+              style={{
+                minWidth: 40,
+                backgroundColor: rangeIdx === idx ? palette.accent : palette.surface2,
+              }}
+              className="py-1 rounded border items-center"
             >
               <Text
                 className={`text-[10px] ${
@@ -248,7 +264,7 @@ export function OmissionChart({
 
               {/* 二阶折线 */}
               {secondLinePath && (
-                <SkPath path={secondLinePath} color={BLACK} style="stroke" strokeWidth={1} />
+                <SkPath path={secondLinePath} color={MAIN_LINE} style="stroke" strokeWidth={1.2} />
               )}
 
               {/* 二阶球 */}
@@ -281,7 +297,7 @@ export function OmissionChart({
                 <SkLine
                   p1={vec(0, yScale2(theoryMiss))}
                   p2={vec(chartWidth, yScale2(theoryMiss))}
-                  color={BLACK}
+                  color={THEORY_COLOR}
                   strokeWidth={1.2}
                 />
               )}
@@ -308,14 +324,14 @@ export function OmissionChart({
 
               {/* 一阶折线 */}
               {firstLinePath && (
-                <SkPath path={firstLinePath} color={BLACK} style="stroke" strokeWidth={1.2} />
+                <SkPath path={firstLinePath} color={MAIN_LINE} style="stroke" strokeWidth={1.2} />
               )}
 
               {/* 折线延伸到虚拟点（虚线） */}
               <SkLine
                 p1={vec(xFor(n - 1), yScale2(currentMiss))}
                 p2={vec(virtualX, virtualY)}
-                color={BLACK}
+                color={MAIN_LINE}
                 strokeWidth={1.2}
               >
                 <DashPathEffect intervals={[4, 3]} />
@@ -374,7 +390,7 @@ export function OmissionChart({
                       width: pad.left - 4,
                       textAlign: 'right',
                       fontSize: compact ? 6 : 8,
-                      color: LABEL_COLOR,
+                      color: TICK_COLOR,
                     }}
                   >
                     {(secondMax * r).toFixed(0)}
@@ -387,7 +403,7 @@ export function OmissionChart({
                       width: pad.left - 4,
                       textAlign: 'right',
                       fontSize: compact ? 6 : 8,
-                      color: LABEL_COLOR,
+                      color: TICK_COLOR,
                     }}
                   >
                     {(displayMax * r).toFixed(1)}
@@ -412,7 +428,7 @@ export function OmissionChart({
                         width: 6,
                         textAlign: 'center',
                         fontSize: 5,
-                        color: LABEL_COLOR,
+                        color: TICK_COLOR,
                       }}
                     >
                       {ch}

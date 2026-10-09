@@ -2,15 +2,39 @@
  * 组号缩水页。
  */
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { Screen } from '@/components/Screen';
+import {
+  BottomBar,
+  Chip,
+  CodePill,
+  DigitGrid,
+  Field,
+  Legend,
+  Panel,
+  ResultBanner,
+  Segmented,
+} from '@/components/ui/Kit';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
 import { applyFilters, emptyFilters, isFilterEmpty, type Filters } from '@/lib/lottery/filters';
+import { fontSize as fs, radius, semantic, space, touch } from '@/lib/theme';
 
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 const SUM_RANGE = Array.from({ length: 28 }, (_, i) => i);
+const DAN_COUNTS = [0, 1, 2, 3];
+/** 号码列表最多渲染多少注（原型 .code-list 截断策略） */
+const MAX_SHOW = 120;
 const BMS_KEYS = [
   '3大', '2大1中', '2大1小', '1大2中', '1大1中1小',
   '1大2小', '3中', '2中1小', '1中2小', '3小',
@@ -33,7 +57,47 @@ function classify(codes: string[]): { zusan: string[]; zuliu: string[] } {
   return { zusan, zuliu };
 }
 
+/** 原型 .fold > .group：可折叠筛选分组 */
+function Fold({
+  title,
+  defaultOpen = true,
+  open: openProp,
+  onToggle,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  /** 受控展开态，缺省时由组件内部维护 */
+  open?: boolean;
+  onToggle?: () => void;
+  children: React.ReactNode;
+}) {
+  const [inner, setInner] = useState(defaultOpen);
+  const open = openProp ?? inner;
+  return (
+    <View style={styles.foldGroup}>
+      <Pressable
+        onPress={() => {
+          setInner(!open);
+          onToggle?.();
+        }}
+        style={styles.foldSummary}
+        accessibilityState={{ expanded: open }}
+      >
+        <Text style={[styles.foldTitle, open && styles.foldTitleOn]}>{title}</Text>
+        <Text style={[styles.foldArrow, open && styles.foldTitleOn]}>
+          {open ? '▾' : '▸'}
+        </Text>
+      </Pressable>
+      {open ? <View style={styles.foldBody}>{children}</View> : null}
+    </View>
+  );
+}
+
 export default function ShrinkScreen() {
+  const { width, height } = useWindowDimensions();
+  const landscape = width >= 860 || width > height;
+
   const [dan, setDan] = useState<number[]>([]);
   const [tuo, setTuo] = useState<number[]>([]);
   const [filters, setFilters] = useState<Filters>(emptyFilters());
@@ -99,11 +163,6 @@ export default function ShrinkScreen() {
     router.push({ pathname: '/(tabs)/analyze', params: { codes, mode: 'zhixuan' } });
   };
 
-  const btn = (active: boolean) =>
-    `rounded items-center justify-center ${active ? 'bg-accent' : 'bg-surface-secondary border border-border'}`;
-  const txt = (active: boolean) =>
-    `font-bold ${active ? 'text-accent-foreground' : 'text-muted'}`;
-
   const toggleArr = (key: keyof Filters, v: number) => {
     setFilters((p) => {
       const arr = p[key] as number[];
@@ -117,67 +176,44 @@ export default function ShrinkScreen() {
     });
   };
 
-  // 通用：「标签 + 数字按钮 0-9」行
-  const numRow = (
-    label: string,
-    key: keyof Filters,
-    labelWidth = 36,
-    btnW = 24,
-    btnH = 24,
-    fontSize = 10,
-  ) => {
-    const arr = filters[key] as number[];
-    return (
-      <View className="flex-row items-center flex-wrap gap-1 mb-1">
-        <Text className="text-xs text-muted" style={{ width: labelWidth }}>{label}</Text>
-        {DIGITS.map((d) => {
-          const active = arr.includes(d);
-          return (
-            <Pressable key={d} onPress={() => toggleArr(key, d)}
-              className={btn(active)} style={{ width: btnW, height: btnH }}>
-              <Text className={`text-[${fontSize}px] ${txt(active)}`}>{d}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    );
-  };
+  // 通用：数字格 0-9（44px 触控）
+  const digitGrid = (key: keyof Filters, columns = 5, digits: number[] = DIGITS) => (
+    <DigitGrid
+      digits={digits}
+      selected={filters[key] as number[]}
+      onToggle={(d) => toggleArr(key, d)}
+      columns={columns}
+    />
+  );
 
-  // 通用：「标签 + 组合按钮」行
-  const chipRow = <T extends number | string>(
-    label: string,
+  // 通用：「说明 + 数字格」字段
+  const digitField = (caption: string, key: keyof Filters, columns = 5, digits: number[] = DIGITS) => (
+    <Field caption={caption}>{digitGrid(key, columns, digits)}</Field>
+  );
+
+  // 通用：「说明 + 多选组合」字段
+  const chipField = <T extends number | string>(
+    caption: string,
     key: keyof Filters,
     options: { v: T; label: string }[],
   ) => {
     const arr = filters[key] as T[];
     return (
-      <View className="flex-row items-center flex-wrap gap-1 mb-1">
-        <Text className="text-xs text-muted" style={{ width: 36 }}>{label}</Text>
-        {options.map((o) => {
-          const active = arr.includes(o.v);
-          const onPress = typeof o.v === 'number' ? () => toggleArr(key, o.v as number) : () => toggleStrArr(key, o.v as string);
-          return (
-            <Pressable key={String(o.v)} onPress={onPress} className={btn(active)}
-              style={{ paddingHorizontal: 8, height: 26 }}>
-              <Text className={`text-[11px] ${txt(active)}`}>{o.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <Field caption={caption}>
+        <View style={styles.chipWrap}>
+          {options.map((o) => {
+            const active = arr.includes(o.v);
+            const onPress = typeof o.v === 'number' ? () => toggleArr(key, o.v as number) : () => toggleStrArr(key, o.v as string);
+            return <Chip key={String(o.v)} label={o.label} active={active} onPress={onPress} />;
+          })}
+        </View>
+      </Field>
     );
   };
 
-  // ============ 卡片渲染 ============
-  const cardHeader = (title: string, onClear: () => void) => (
-    <View className="flex-row items-center justify-between mb-2">
-      <Text className="text-xs text-muted">{title}</Text>
-      <Pressable onPress={onClear}><Text className="text-[10px] text-accent font-bold">清</Text></Pressable>
-    </View>
-  );
-
+  // ============ 分组渲染 ============
   const renderPosFilter = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      <Text className="text-xs text-muted mb-2">定位（默认全选，点击取消）</Text>
+    <Fold title="定位（默认全选，点击取消）">
       {([
         { label: '百位', key: 'posBai' as const },
         { label: '十位', key: 'posShi' as const },
@@ -185,422 +221,455 @@ export default function ShrinkScreen() {
       ] as const).map(({ label, key }) => {
         const allSelected = filters[key].length === 10;
         return (
-          <View key={key} className="flex-row items-center flex-wrap gap-1 mb-2">
-            <Text className="text-xs text-muted" style={{ width: 30 }}>{label}</Text>
-            {DIGITS.map((d) => {
-              const active = filters[key].includes(d);
-              return (
-                <Pressable key={d} onPress={() => toggleArr(key, d)}
-                  className={btn(active)} style={{ width: 26, height: 26 }}>
-                  <Text className={`text-[11px] ${txt(active)}`}>{d}</Text>
-                </Pressable>
-              );
-            })}
-            <Pressable
+          <View key={key}>
+            {digitField(label, key)}
+            <Chip
+              label="全选"
+              active={allSelected}
               onPress={() => setFilters((p) => ({ ...p, [key]: allSelected ? [] : [...DIGITS] }))}
-              className={`rounded items-center justify-center ${allSelected ? 'bg-accent' : 'bg-surface-secondary border border-border'}`}
-              style={{ width: 30, height: 26 }}>
-              <Text className={`text-[11px] font-bold ${allSelected ? 'text-accent-foreground' : 'text-muted'}`}>全</Text>
-            </Pressable>
+            />
           </View>
         );
       })}
-    </View>
+    </Fold>
   );
 
-  const renderDanCountFilter = () => {
-    const rows = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]];
-    return (
-      <View className="bg-white rounded-xl border border-border p-3 mb-2">
-        {cardHeader('胆码出现次数（0-3，不限=不筛）', () => {
-          const nc: Record<number, number | null> = {};
-          for (let i = 0; i <= 9; i += 1) nc[i] = null;
-          setFilters((p) => ({ ...p, danCount: nc }));
-        })}
-        {rows.map((row, ri) => (
-          <View key={ri} className="flex-row items-center gap-1 mb-2">
-            {row.map((d) => (
-              <View key={d} className="flex-1 items-center">
-                <Text className="text-sm font-bold text-foreground mb-1">{d}</Text>
-                <Pressable
-                  onPress={() => setFilters((p) => ({ ...p, danCount: { ...p.danCount, [d]: null } }))}
-                  className={btn(filters.danCount[d] === null)}
-                  style={{ width: '100%', height: 22, marginBottom: 2 }}>
-                  <Text className={`text-[10px] ${txt(filters.danCount[d] === null)}`}>不限</Text>
-                </Pressable>
-                <View className="flex-row gap-0.5" style={{ width: '100%' }}>
-                  {[0, 1, 2, 3].map((cnt) => (
-                    <Pressable key={cnt}
-                      onPress={() => setFilters((p) => ({ ...p, danCount: { ...p.danCount, [d]: cnt } }))}
-                      className={`flex-1 rounded items-center justify-center ${filters.danCount[d] === cnt ? 'bg-accent' : 'bg-surface-secondary border border-border'}`}
-                      style={{ height: 20 }}>
-                      <Text className={`text-[10px] font-bold ${filters.danCount[d] === cnt ? 'text-accent-foreground' : 'text-muted'}`}>{cnt}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ))}
-          </View>
-        ))}
+  const renderDanCountFilter = () => (
+    <Fold title="胆码出现次数（0-3，不限=不筛）">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="全部不限"
+          active={false}
+          onPress={() => {
+            const nc: Record<number, number | null> = {};
+            for (let i = 0; i <= 9; i += 1) nc[i] = null;
+            setFilters((p) => ({ ...p, danCount: nc }));
+          }}
+        />
       </View>
-    );
-  };
+      {DIGITS.map((d) => {
+        const cur = filters.danCount[d];
+        return (
+          <View key={d} style={styles.danRow}>
+            <Text style={styles.danRowLabel}>{d}</Text>
+            <View style={styles.danRowCtl}>
+              <Segmented<string>
+                options={[
+                  { value: 'none', label: '不限' },
+                  ...DAN_COUNTS.map((c) => ({ value: String(c), label: String(c) })),
+                ]}
+                value={cur === null ? 'none' : String(cur)}
+                onChange={(v) =>
+                  setFilters((p) => ({
+                    ...p,
+                    danCount: { ...p.danCount, [d]: v === 'none' ? null : Number(v) },
+                  }))
+                }
+                equalWidth
+              />
+            </View>
+          </View>
+        );
+      })}
+    </Fold>
+  );
 
   // 形态卡（大小 / 单双 / 质合 / 大中小）
   const renderFormCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('形态（可多选，不选=不限）', () =>
-        setFilters((p) => ({ ...p, bigSmall: [], oddEven: [], primeCount: [], bmsKey: [] })))}
-      <View className="flex-row items-center gap-3 mb-2">
-        {chipRow('大小', 'bigSmall', [
-          { v: 3, label: '3大' }, { v: 2, label: '2大1小' }, { v: 1, label: '1大2小' }, { v: 0, label: '3小' },
-        ])}
-        {chipRow('单双', 'oddEven', [
-          { v: 3, label: '3单' }, { v: 2, label: '2单1双' }, { v: 1, label: '1单2双' }, { v: 0, label: '3双' },
-        ])}
+    <Fold title="形态（可多选，不选=不限）">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="清空形态"
+          active={false}
+          onPress={() => setFilters((p) => ({ ...p, bigSmall: [], oddEven: [], primeCount: [], bmsKey: [] }))}
+        />
       </View>
-      {chipRow('质合', 'primeCount', [
+      {chipField('大小', 'bigSmall', [
+        { v: 3, label: '3大' }, { v: 2, label: '2大1小' }, { v: 1, label: '1大2小' }, { v: 0, label: '3小' },
+      ])}
+      {chipField('单双', 'oddEven', [
+        { v: 3, label: '3单' }, { v: 2, label: '2单1双' }, { v: 1, label: '1单2双' }, { v: 0, label: '3双' },
+      ])}
+      {chipField('质合', 'primeCount', [
         { v: 3, label: '3质' }, { v: 2, label: '2质1合' }, { v: 1, label: '1质2合' }, { v: 0, label: '3合' },
       ])}
-      {chipRow('大中小', 'bmsKey', BMS_KEYS.map((k) => ({ v: k, label: k })))}
-    </View>
+      {chipField('大中小', 'bmsKey', BMS_KEYS.map((k) => ({ v: k, label: k })))}
+    </Fold>
   );
 
   const renderZuiShuCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('最数（可多选，不选=不限）', () =>
-        setFilters((p) => ({ ...p, minNum: [], midNum: [], maxNum: [] })))}
-      {numRow('最小', 'minNum')}
-      {numRow('中间', 'midNum')}
-      {numRow('最大', 'maxNum')}
-    </View>
+    <Fold title="最数（可多选，不选=不限）">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="清空最数"
+          active={false}
+          onPress={() => setFilters((p) => ({ ...p, minNum: [], midNum: [], maxNum: [] }))}
+        />
+      </View>
+      {digitField('最小', 'minNum')}
+      {digitField('中间', 'midNum')}
+      {digitField('最大', 'maxNum')}
+    </Fold>
   );
 
   const renderSumCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('和值（0-27，可多选）', () => setFilters((p) => ({ ...p, sum: [] })))}
-      <View className="flex-row flex-wrap gap-1">
-        {SUM_RANGE.map((v) => {
-          const active = filters.sum.includes(v);
-          return (
-            <Pressable key={v} onPress={() => toggleArr('sum', v)}
-              className={btn(active)} style={{ width: 26, height: 24 }}>
-              <Text className={`text-[10px] ${txt(active)}`}>{v}</Text>
-            </Pressable>
-          );
-        })}
+    <Fold title="和值（0-27，可多选）">
+      <View style={styles.chipWrap}>
+        <Chip label="清空和值" active={false} onPress={() => setFilters((p) => ({ ...p, sum: [] }))} />
       </View>
-    </View>
+      {digitField('和值', 'sum', 7, SUM_RANGE)}
+    </Fold>
   );
 
   const renderSumTailSpanCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('和值尾 / 跨度', () => setFilters((p) => ({ ...p, sumTail: [], span: [] })))}
-      {numRow('和值尾', 'sumTail')}
-      {numRow('跨度', 'span')}
-    </View>
+    <Fold title="和值尾 / 跨度">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="清空"
+          active={false}
+          onPress={() => setFilters((p) => ({ ...p, sumTail: [], span: [] }))}
+        />
+      </View>
+      {digitField('和值尾', 'sumTail')}
+      {digitField('跨度', 'span')}
+    </Fold>
   );
 
   const renderSpecialCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('特殊形态（连号 / 成对 / 012路）', () =>
-        setFilters((p) => ({ ...p, lianhao: [], pair: [], road0: [], road1: [], road2: [] })))}
-      {chipRow('连号', 'lianhao', [
+    <Fold title="特殊形态（连号 / 成对 / 012路）">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="清空特殊形态"
+          active={false}
+          onPress={() => setFilters((p) => ({ ...p, lianhao: [], pair: [], road0: [], road1: [], road2: [] }))}
+        />
+      </View>
+      {chipField('连号', 'lianhao', [
         { v: 0, label: '无连' }, { v: 2, label: '二连' }, { v: 3, label: '三连' },
       ])}
-      {chipRow('成对', 'pair', [
+      {chipField('成对', 'pair', [
         { v: 0, label: '无' }, { v: 3, label: '组三' }, { v: 9, label: '豹子' },
       ])}
-      {chipRow('0路个数', 'road0', [0, 1, 2, 3].map((v) => ({ v, label: String(v) })))}
-      {chipRow('1路个数', 'road1', [0, 1, 2, 3].map((v) => ({ v, label: String(v) })))}
-      {chipRow('2路个数', 'road2', [0, 1, 2, 3].map((v) => ({ v, label: String(v) })))}
+      {chipField('0路个数', 'road0', [0, 1, 2, 3].map((v) => ({ v, label: String(v) })))}
+      {chipField('1路个数', 'road1', [0, 1, 2, 3].map((v) => ({ v, label: String(v) })))}
+      {chipField('2路个数', 'road2', [0, 1, 2, 3].map((v) => ({ v, label: String(v) })))}
+    </Fold>
+  );
+
+  const renderTwoMaCard = () => {
+    const pair2Arr = filters.pair2 as string[];
+    return (
+      <Fold title="两码（可多选）">
+        <View style={styles.chipWrap}>
+          <Chip
+            label="清空两码"
+            active={false}
+            onPress={() => setFilters((p) => ({ ...p, twoSumTail: [], twoDiff: [], pair2: [] }))}
+          />
+        </View>
+        <Field caption="两码和尾（号码包含任一）">{digitGrid('twoSumTail')}</Field>
+        <Field caption="两码差（号码包含任一）">{digitGrid('twoDiff')}</Field>
+        <Field caption="不定位两码（号码同时包含这两位）">
+          <View style={styles.chipWrap}>
+            {PAIR2_KEYS.map((k) => (
+              <Chip
+                key={`p2-${k}`}
+                label={k}
+                active={pair2Arr.includes(k)}
+                onPress={() => toggleStrArr('pair2', k)}
+              />
+            ))}
+          </View>
+        </Field>
+      </Fold>
+    );
+  };
+
+  const codeList = (codes: string[], kind?: 'normal' | 'zu') => (
+    <View>
+      <View style={styles.codeList}>
+        {codes.slice(0, MAX_SHOW).map((c) => (
+          <CodePill key={c} code={c} kind={kind} />
+        ))}
+      </View>
+      {codes.length === 0 ? <Text style={styles.hint}>（无）</Text> : null}
+      {codes.length > MAX_SHOW ? (
+        <Text style={styles.hint}>仅显示前 {MAX_SHOW} 注，共 {codes.length} 注</Text>
+      ) : null}
     </View>
   );
 
-  const renderTwoMaCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('两码（可多选）', () =>
-        setFilters((p) => ({ ...p, twoSumTail: [], twoDiff: [], pair2: [] })))}
-      <Text className="text-xs text-muted mb-1">两码和尾（号码包含任一）</Text>
-      <View className="flex-row flex-wrap gap-1 mb-2">
-        {DIGITS.map((d) => {
-          const active = filters.twoSumTail.includes(d);
-          return (
-            <Pressable key={`ts-${d}`} onPress={() => toggleArr('twoSumTail', d)}
-              className={btn(active)} style={{ width: 24, height: 24 }}>
-              <Text className={`text-[10px] ${txt(active)}`}>{d}</Text>
-            </Pressable>
-          );
-        })}
+  const filterSummary = () => {
+    const lines: string[] = [];
+    const danActive = Object.entries(filters.danCount)
+      .filter(([, v]) => v !== null).map(([d, v]) => `${d}出现${v}次`);
+    if (danActive.length > 0) lines.push(`胆码出次：${danActive.join('、')}`);
+    if (filters.bigSmall.length > 0) {
+      const m: Record<number, string> = { 3: '3大', 2: '2大1小', 1: '1大2小', 0: '3小' };
+      lines.push(`大小：${filters.bigSmall.map((v) => m[v]).join('、')}`);
+    }
+    if (filters.oddEven.length > 0) {
+      const m: Record<number, string> = { 3: '3单', 2: '2单1双', 1: '1单2双', 0: '3双' };
+      lines.push(`单双：${filters.oddEven.map((v) => m[v]).join('、')}`);
+    }
+    if (filters.primeCount.length > 0) {
+      const m: Record<number, string> = { 3: '3质', 2: '2质1合', 1: '1质2合', 0: '3合' };
+      lines.push(`质合：${filters.primeCount.map((v) => m[v]).join('、')}`);
+    }
+    if (filters.bmsKey.length > 0) lines.push(`大中小：${filters.bmsKey.join('、')}`);
+    if (filters.minNum.length > 0) lines.push(`最小：${filters.minNum.join('、')}`);
+    if (filters.midNum.length > 0) lines.push(`中间：${filters.midNum.join('、')}`);
+    if (filters.maxNum.length > 0) lines.push(`最大：${filters.maxNum.join('、')}`);
+    if (filters.sum.length > 0) lines.push(`和值：${filters.sum.join('、')}`);
+    if (filters.sumTail.length > 0) lines.push(`和值尾：${filters.sumTail.join('、')}`);
+    if (filters.span.length > 0) lines.push(`跨度：${filters.span.join('、')}`);
+    if (filters.lianhao.length > 0) {
+      const m: Record<number, string> = { 0: '无连', 2: '二连', 3: '三连' };
+      lines.push(`连号：${filters.lianhao.map((v) => m[v]).join('、')}`);
+    }
+    if (filters.pair.length > 0) {
+      const m: Record<number, string> = { 0: '无', 3: '组三', 9: '豹子' };
+      lines.push(`成对：${filters.pair.map((v) => m[v]).join('、')}`);
+    }
+    if (filters.road0.length > 0) lines.push(`0路：${filters.road0.join('、')}个`);
+    if (filters.road1.length > 0) lines.push(`1路：${filters.road1.join('、')}个`);
+    if (filters.road2.length > 0) lines.push(`2路：${filters.road2.join('、')}个`);
+    if (filters.twoSumTail.length > 0) lines.push(`两码和尾：${filters.twoSumTail.join('、')}`);
+    if (filters.twoDiff.length > 0) lines.push(`两码差：${filters.twoDiff.join('、')}`);
+    if (filters.pair2.length > 0) lines.push(`不定位两码：${filters.pair2.join('、')}`);
+    return lines;
+  };
+
+  const summaryLines = filterSummary();
+
+  const leftCol = (
+    <View style={[styles.col, landscape && styles.colLeft]}>
+      <Panel label="胆拖 · 福彩3D">
+        <Field caption="胆码（不选=全选 1000 注，可多选）">
+          <DigitGrid digits={DIGITS} selected={dan} onToggle={toggleDan} columns={5} />
+        </Field>
+        <Field caption="拖码（可选，用来补位）">
+          <DigitGrid digits={DIGITS} selected={tuo} onToggle={toggleTuo} columns={5} />
+        </Field>
+      </Panel>
+
+      <View style={styles.chipWrap}>
+        <Chip label="筛选条件" active={showFilters} onPress={() => setShowFilters((v) => !v)} />
+        {!isFilterEmpty(filters) ? (
+          <Chip label="清除所有筛选" active={false} onPress={() => setFilters(emptyFilters())} />
+        ) : null}
       </View>
-      <Text className="text-xs text-muted mb-1">两码差（号码包含任一）</Text>
-      <View className="flex-row flex-wrap gap-1 mb-2">
-        {DIGITS.map((d) => {
-          const active = filters.twoDiff.includes(d);
-          return (
-            <Pressable key={`td-${d}`} onPress={() => toggleArr('twoDiff', d)}
-              className={btn(active)} style={{ width: 24, height: 24 }}>
-              <Text className={`text-[10px] ${txt(active)}`}>{d}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      <Text className="text-xs text-muted mb-1">不定位两码（号码同时包含这两位）</Text>
-      <View className="flex-row flex-wrap gap-1">
-        {PAIR2_KEYS.map((k) => {
-          const active = filters.pair2.includes(k);
-          return (
-            <Pressable key={`p2-${k}`} onPress={() => toggleStrArr('pair2', k)}
-              className={btn(active)} style={{ width: 30, height: 24 }}>
-              <Text className={`text-[10px] ${txt(active)}`}>{k}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+
+      {showFilters ? (
+        <View style={styles.fold}>
+          {renderPosFilter()}
+          {renderDanCountFilter()}
+          {renderFormCard()}
+          {renderZuiShuCard()}
+          {renderSumCard()}
+          {renderSumTailSpanCard()}
+          {renderSpecialCard()}
+          {renderTwoMaCard()}
+        </View>
+      ) : null}
     </View>
   );
 
-  return (
-    <Screen safeAreaEdges={['top', 'left', 'right']}>
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 12, paddingBottom: 24 }}>
-        {/* 胆码 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-xs text-muted mb-2">胆码（不选=全选 1000 注，可多选）</Text>
-          <View className="flex-row flex-wrap gap-1.5">
-            {DIGITS.map((d) => {
-              const active = dan.includes(d);
-              return (
-                <Pressable key={d} onPress={() => toggleDan(d)} className={btn(active)}
-                  style={{ width: 36, height: 36 }}>
-                  <Text className={`text-sm ${txt(active)}`}>{d}</Text>
-                </Pressable>
-              );
-            })}
+  const rightCol = (
+    <View style={styles.col}>
+      <ResultBanner
+        items={[
+          { value: String(result.zhixuan.length), label: '直选注数' },
+          { value: String(result.zuxuan.length), label: '组选注数' },
+          { value: `${result.zhixuan.length * 2} 元`, label: '直选金额' },
+          { value: `${result.zuxuan.length * 2} 元`, label: '组选金额' },
+        ]}
+      />
+
+      <Panel label="摘 要">
+        <Text style={styles.summaryStrong}>胆码：{dan.length > 0 ? dan.join(' ') : '（未选）'}</Text>
+        <Text style={styles.summaryStrong}>拖码：{tuo.length > 0 ? tuo.join(' ') : '（未选）'}</Text>
+        {summaryLines.length > 0 ? (
+          <View style={styles.summaryBlock}>
+            {summaryLines.map((l, i) => (
+              <Text key={i} style={styles.summaryLine}>· {l}</Text>
+            ))}
           </View>
-        </View>
+        ) : null}
+        <Text style={styles.hint}>
+          {isFilterEmpty(filters)
+            ? `直选 ${result.zhixuan.length} 注 · 组选 ${result.zuxuan.length} 注`
+            : `原始 ${rawResult.zhixuan.length} 注 → 筛选后 直选 ${result.zhixuan.length} 注 · 组选 ${result.zuxuan.length} 注`}
+        </Text>
+      </Panel>
 
-        {/* 拖码 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-xs text-muted mb-2">拖码（可选，用来补位）</Text>
-          <View className="flex-row flex-wrap gap-1.5">
-            {DIGITS.map((d) => {
-              const active = tuo.includes(d);
-              return (
-                <Pressable key={d} onPress={() => toggleTuo(d)} className={btn(active)}
-                  style={{ width: 36, height: 36 }}>
-                  <Text className={`text-sm ${txt(active)}`}>{d}</Text>
-                </Pressable>
-              );
-            })}
+      <View style={styles.fold}>
+        <Fold
+          title={`单选（直选）· 共 ${result.zhixuan.length} 注`}
+          defaultOpen={showZhixuan}
+          open={showZhixuan}
+          onToggle={() => setShowZhixuan((v) => !v)}
+        >
+          <View style={styles.chipWrap}>
+            <Chip label="复制直选" active={false} onPress={() => { void copy(result.zhixuan.join(' '), '复制直选全部'); }} />
+            <Chip label="复制组三" active={false} onPress={() => { void copy(zx.zusan.join(' '), '复制直选·组三'); }} />
+            <Chip label="复制组六" active={false} onPress={() => { void copy(zx.zuliu.join(' '), '复制直选·组六'); }} />
           </View>
-        </View>
+          <Text style={styles.subTitle}>组三形态（{zx.zusan.length} 注）</Text>
+          {codeList(zx.zusan)}
+          <View style={styles.divider} />
+          <Text style={styles.subTitle}>组六形态（{zx.zuliu.length} 注）</Text>
+          {codeList(zx.zuliu)}
+        </Fold>
 
-        {/* 筛选开关 */}
-        <View className="flex-row items-center gap-2 mb-2">
-          <Pressable onPress={() => setShowFilters((v) => !v)} className={btn(showFilters)}
-            style={{ paddingHorizontal: 10, height: 28 }}>
-            <Text className={`text-xs ${txt(showFilters)}`}>{showFilters ? '▼' : '▶'} 筛选条件</Text>
-          </Pressable>
-          {!isFilterEmpty(filters) && (
-            <Pressable onPress={() => setFilters(emptyFilters())} className={btn(false)}
-              style={{ paddingHorizontal: 10, height: 28 }}>
-              <Text className="text-xs text-foreground">清除所有筛选</Text>
-            </Pressable>
-          )}
-        </View>
+        <Fold
+          title={`组选 · 共 ${result.zuxuan.length} 注`}
+          defaultOpen={showZuxuan}
+          open={showZuxuan}
+          onToggle={() => setShowZuxuan((v) => !v)}
+        >
+          <View style={styles.chipWrap}>
+            <Chip label="复制组选" active={false} onPress={() => { void copy(result.zuxuan.join(' '), '复制组选全部'); }} />
+            <Chip label="复制组三" active={false} onPress={() => { void copy(zux.zusan.join(' '), '复制组三'); }} />
+            <Chip label="复制组六" active={false} onPress={() => { void copy(zux.zuliu.join(' '), '复制组六'); }} />
+          </View>
+          <Text style={styles.subTitle}>组三（{zux.zusan.length} 注）</Text>
+          {codeList(zux.zusan, 'zu')}
+          <View style={styles.divider} />
+          <Text style={styles.subTitle}>组六（{zux.zuliu.length} 注）</Text>
+          {codeList(zux.zuliu, 'zu')}
+        </Fold>
+      </View>
 
-        {showFilters && (
-          <>
-            {renderPosFilter()}
-            {renderDanCountFilter()}
-            {renderFormCard()}
-            {renderZuiShuCard()}
-            {renderSumCard()}
-            {renderSumTailSpanCard()}
-            {renderSpecialCard()}
-            {renderTwoMaCard()}
-          </>
-        )}
+      <Legend
+        items={[
+          { color: semantic.hot, label: '组三形态' },
+          { color: semantic.cold, label: '组选号码' },
+          { color: semantic.dan, label: '已选 / 胆码' },
+        ]}
+      />
 
-        {/* 摘要 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-sm font-semibold text-foreground mb-1">
-            胆码：{dan.length > 0 ? dan.join(' ') : '（未选）'}
-          </Text>
-          <Text className="text-sm font-semibold text-foreground mb-2">
-            拖码：{tuo.length > 0 ? tuo.join(' ') : '（未选）'}
-          </Text>
-          {(() => {
-            const lines: string[] = [];
-            const danActive = Object.entries(filters.danCount)
-              .filter(([, v]) => v !== null).map(([d, v]) => `${d}出现${v}次`);
-            if (danActive.length > 0) lines.push(`胆码出次：${danActive.join('、')}`);
-            if (filters.bigSmall.length > 0) {
-              const m: Record<number, string> = { 3: '3大', 2: '2大1小', 1: '1大2小', 0: '3小' };
-              lines.push(`大小：${filters.bigSmall.map((v) => m[v]).join('、')}`);
-            }
-            if (filters.oddEven.length > 0) {
-              const m: Record<number, string> = { 3: '3单', 2: '2单1双', 1: '1单2双', 0: '3双' };
-              lines.push(`单双：${filters.oddEven.map((v) => m[v]).join('、')}`);
-            }
-            if (filters.primeCount.length > 0) {
-              const m: Record<number, string> = { 3: '3质', 2: '2质1合', 1: '1质2合', 0: '3合' };
-              lines.push(`质合：${filters.primeCount.map((v) => m[v]).join('、')}`);
-            }
-            if (filters.bmsKey.length > 0) lines.push(`大中小：${filters.bmsKey.join('、')}`);
-            if (filters.minNum.length > 0) lines.push(`最小：${filters.minNum.join('、')}`);
-            if (filters.midNum.length > 0) lines.push(`中间：${filters.midNum.join('、')}`);
-            if (filters.maxNum.length > 0) lines.push(`最大：${filters.maxNum.join('、')}`);
-            if (filters.sum.length > 0) lines.push(`和值：${filters.sum.join('、')}`);
-            if (filters.sumTail.length > 0) lines.push(`和值尾：${filters.sumTail.join('、')}`);
-            if (filters.span.length > 0) lines.push(`跨度：${filters.span.join('、')}`);
-            if (filters.lianhao.length > 0) {
-              const m: Record<number, string> = { 0: '无连', 2: '二连', 3: '三连' };
-              lines.push(`连号：${filters.lianhao.map((v) => m[v]).join('、')}`);
-            }
-            if (filters.pair.length > 0) {
-              const m: Record<number, string> = { 0: '无', 3: '组三', 9: '豹子' };
-              lines.push(`成对：${filters.pair.map((v) => m[v]).join('、')}`);
-            }
-            if (filters.road0.length > 0) lines.push(`0路：${filters.road0.join('、')}个`);
-            if (filters.road1.length > 0) lines.push(`1路：${filters.road1.join('、')}个`);
-            if (filters.road2.length > 0) lines.push(`2路：${filters.road2.join('、')}个`);
-            if (filters.twoSumTail.length > 0) lines.push(`两码和尾：${filters.twoSumTail.join('、')}`);
-            if (filters.twoDiff.length > 0) lines.push(`两码差：${filters.twoDiff.join('、')}`);
-            if (filters.pair2.length > 0) lines.push(`不定位两码：${filters.pair2.join('、')}`);
-
-            if (lines.length === 0) return null;
-            return (
-              <View className="mb-2 pb-2 border-b border-border">
-                {lines.map((l, i) => (
-                  <Text key={i} className="text-xs text-foreground mb-0.5">· {l}</Text>
-                ))}
-              </View>
-            );
-          })()}
-          <Text className="text-xs text-muted mb-0.5">
-            {isFilterEmpty(filters)
-              ? `直选 ${result.zhixuan.length} 注 · 组选 ${result.zuxuan.length} 注`
-              : `原始 ${rawResult.zhixuan.length} 注 → 筛选后 直选 ${result.zhixuan.length} 注 · 组选 ${result.zuxuan.length} 注`}
-          </Text>
-          <Text className="text-xs text-muted">
-            直选 {result.zhixuan.length * 2} 元 · 组选 {result.zuxuan.length * 2} 元
-          </Text>
-        </View>
-
-        {/* 操作 */}
-        <View className="flex-row gap-2 mb-2">
-          <Pressable onPress={onChart} disabled={result.zuxuan.length === 0}
-            className={`flex-1 py-2.5 rounded-lg items-center ${result.zuxuan.length === 0 ? 'bg-surface-secondary' : 'bg-accent'}`}>
-            <Text className={`text-sm font-bold ${result.zuxuan.length === 0 ? 'text-muted' : 'text-accent-foreground'}`}>出图</Text>
-          </Pressable>
-          <Pressable onPress={reset} className="px-4 py-2.5 rounded-lg bg-surface-secondary items-center">
-            <Text className="text-sm text-foreground">重设</Text>
-          </Pressable>
-        </View>
-
-        {/* 直选结果 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Pressable onPress={() => setShowZhixuan((v) => !v)}>
-            <Text className="text-xs text-muted">{showZhixuan ? '▼' : '▶'} 单选（直选）· 共 {result.zhixuan.length} 注</Text>
-          </Pressable>
-          {showZhixuan && (
-            <View className="mt-2">
-              <View className="flex-row gap-1.5 mb-3">
-                <Pressable onPress={() => copy(result.zhixuan.join(' '), '复制直选全部')} className="flex-1 py-1.5 rounded bg-surface-secondary items-center">
-                  <Text className="text-[10px] text-foreground">复制直选</Text>
-                </Pressable>
-                <Pressable onPress={() => copy(zx.zusan.join(' '), '复制直选·组三')} className="flex-1 py-1.5 rounded bg-surface-secondary items-center">
-                  <Text className="text-[10px] text-foreground">复制组三</Text>
-                </Pressable>
-                <Pressable onPress={() => copy(zx.zuliu.join(' '), '复制直选·组六')} className="flex-1 py-1.5 rounded bg-surface-secondary items-center">
-                  <Text className="text-[10px] text-foreground">复制组六</Text>
-                </Pressable>
-              </View>
-              <Text className="text-xs font-bold text-foreground mb-1">组三形态（{zx.zusan.length} 注）</Text>
-              <View style={{ maxHeight: 160 }}>
-                <ScrollView nestedScrollEnabled>
-                  <Text style={{ fontSize: 12, color: '#374151', lineHeight: 20 }}>
-                    {zx.zusan.length > 0 ? zx.zusan.join('  ') : '（无）'}
-                  </Text>
-                </ScrollView>
-              </View>
-              <View className="h-px bg-border my-3" />
-              <Text className="text-xs font-bold text-foreground mb-1">组六形态（{zx.zuliu.length} 注）</Text>
-              <View style={{ maxHeight: 160 }}>
-                <ScrollView nestedScrollEnabled>
-                  <Text style={{ fontSize: 12, color: '#374151', lineHeight: 20 }}>
-                    {zx.zuliu.length > 0 ? zx.zuliu.join('  ') : '（无）'}
-                  </Text>
-                </ScrollView>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* 组选结果 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Pressable onPress={() => setShowZuxuan((v) => !v)}>
-            <Text className="text-xs text-muted">{showZuxuan ? '▼' : '▶'} 组选 · 共 {result.zuxuan.length} 注</Text>
-          </Pressable>
-          {showZuxuan && (
-            <View className="mt-2">
-              <View className="flex-row gap-1.5 mb-3">
-                <Pressable onPress={() => copy(result.zuxuan.join(' '), '复制组选全部')} className="flex-1 py-1.5 rounded bg-surface-secondary items-center">
-                  <Text className="text-[10px] text-foreground">复制组选</Text>
-                </Pressable>
-                <Pressable onPress={() => copy(zux.zusan.join(' '), '复制组三')} className="flex-1 py-1.5 rounded bg-surface-secondary items-center">
-                  <Text className="text-[10px] text-foreground">复制组三</Text>
-                </Pressable>
-                <Pressable onPress={() => copy(zux.zuliu.join(' '), '复制组六')} className="flex-1 py-1.5 rounded bg-surface-secondary items-center">
-                  <Text className="text-[10px] text-foreground">复制组六</Text>
-                </Pressable>
-              </View>
-              <Text className="text-xs font-bold text-foreground mb-1">组三（{zux.zusan.length} 注）</Text>
-              <View style={{ maxHeight: 160 }}>
-                <ScrollView nestedScrollEnabled>
-                  <Text style={{ fontSize: 12, color: '#374151', lineHeight: 20 }}>
-                    {zux.zusan.length > 0 ? zux.zusan.join('  ') : '（无）'}
-                  </Text>
-                </ScrollView>
-              </View>
-              <View className="h-px bg-border my-3" />
-              <Text className="text-xs font-bold text-foreground mb-1">组六（{zux.zuliu.length} 注）</Text>
-              <View style={{ maxHeight: 160 }}>
-                <ScrollView nestedScrollEnabled>
-                  <Text style={{ fontSize: 12, color: '#374151', lineHeight: 20 }}>
-                    {zux.zuliu.length > 0 ? zux.zuliu.join('  ') : '（无）'}
-                  </Text>
-                </ScrollView>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* 外部集合 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-xs text-muted mb-2">外部集合（空格/逗号分隔）</Text>
+      <Panel label="外部集合">
+        <Field caption="空格 / 逗号分隔">
           <TextInput
             value={filterInput}
             onChangeText={setFilterInput}
             multiline
             placeholder="在此粘贴另一组号码"
-            style={{
-              borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8,
-              paddingHorizontal: 10, paddingVertical: 8, fontSize: 12,
-              color: '#111827', minHeight: 60,
-            }}
+            placeholderTextColor={semantic.textFaint}
+            style={styles.input}
           />
-          <View className="flex-row gap-2 mt-2">
-            <Pressable onPress={applyIntersection} className="flex-1 py-2 rounded-lg bg-surface-secondary items-center">
-              <Text className="text-xs text-foreground">取交集（跟组选）</Text>
-            </Pressable>
-            <Pressable onPress={applyDifference} className="flex-1 py-2 rounded-lg bg-surface-secondary items-center">
-              <Text className="text-xs text-foreground">取差集（跟组选）</Text>
-            </Pressable>
-          </View>
+        </Field>
+        <View style={styles.chipWrap}>
+          <Chip label="取交集（跟组选）" active={false} onPress={applyIntersection} />
+          <Chip label="取差集（跟组选）" active={false} onPress={applyDifference} />
         </View>
-      </ScrollView>
+      </Panel>
+    </View>
+  );
+
+  return (
+    <Screen
+      safeAreaEdges={['top', 'left', 'right']}
+      backgroundColor={semantic.pageBg}
+      statusBarStyle="light"
+    >
+      <View style={styles.page}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, landscape && styles.scrollContentWide]}
+        >
+          <View style={[styles.split, landscape && styles.splitLandscape]}>
+            {leftCol}
+            {rightCol}
+          </View>
+        </ScrollView>
+        <BottomBar
+          primaryLabel="生 成"
+          onPrimary={onChart}
+          ghostLabel="清空"
+          onGhost={reset}
+          vertical={landscape}
+          hint={isFilterEmpty(filters)
+            ? `直选 ${result.zhixuan.length} 注 · 组选 ${result.zuxuan.length} 注`
+            : `原始 ${rawResult.zhixuan.length} 注 → 直选 ${result.zhixuan.length} 注 · 组选 ${result.zuxuan.length} 注`}
+        />
+      </View>
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  page: { flex: 1, backgroundColor: semantic.pageBg },
+  scroll: { flex: 1 },
+  scrollContent: { padding: space.md, paddingBottom: space.xxl, gap: space.md },
+  scrollContentWide: { paddingHorizontal: space.lg },
+
+  split: { flexDirection: 'column', gap: space.md },
+  splitLandscape: { flexDirection: 'row', alignItems: 'flex-start' },
+  col: { flexDirection: 'column', gap: space.md, flexShrink: 1 },
+  colLeft: { width: 320, flexGrow: 0, flexShrink: 0 },
+
+  fold: { flexDirection: 'column', gap: space.md },
+  foldGroup: {
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: 10,
+    backgroundColor: semantic.panelBg,
+    overflow: 'hidden',
+  },
+  foldSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: space.md,
+    paddingVertical: 11,
+    minHeight: touch.min,
+  },
+  foldTitle: { fontSize: fs.sm, color: semantic.textDim },
+  foldTitleOn: { color: semantic.brand },
+  foldArrow: { fontSize: fs.sm, color: semantic.textFaint },
+  foldBody: { paddingHorizontal: space.md, paddingBottom: space.md },
+
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  danRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.sm },
+  danRowLabel: {
+    fontSize: fs.base,
+    fontWeight: '700',
+    color: semantic.text,
+    width: 18,
+    textAlign: 'center',
+  },
+  danRowCtl: { flex: 1 },
+
+  codeList: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  subTitle: { fontSize: fs.sm, fontWeight: '700', color: semantic.text, marginBottom: space.sm },
+  divider: {
+    height: 1,
+    backgroundColor: semantic.divider,
+    marginVertical: space.md,
+  },
+  hint: { fontSize: fs.xs, color: semantic.textFaint, lineHeight: 18 },
+
+  summaryStrong: { fontSize: fs.base, fontWeight: '600', color: semantic.text, marginBottom: space.xs },
+  summaryBlock: {
+    borderBottomWidth: 1,
+    borderBottomColor: semantic.divider,
+    paddingBottom: space.sm,
+    marginBottom: space.sm,
+    marginTop: space.xs,
+  },
+  summaryLine: { fontSize: fs.sm, color: semantic.textDim, marginBottom: 2 },
+  input: {
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.sm,
+    backgroundColor: semantic.controlBg,
+    color: semantic.text,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    fontSize: fs.sm,
+    minHeight: 60,
+    textAlignVertical: 'top',
+  },
+});

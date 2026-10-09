@@ -9,14 +9,17 @@ import Svg, { Rect, Line, Path as SvgPath, Circle, Text as SvgText } from 'react
 import type { TrendPoint } from '@/lib/lottery/types';
 import { useChartSize } from './useChartSize';
 import { buildLinePath, buildTicks, niceMax, scaleLinear } from './chartUtils';
+import { palette, semantic } from '@/lib/theme';
 
-const HIT_COLOR = '#e5484d';
-const MISS_COLOR = '#3b82f6';
+/** 开出 = 热（red），未开出 = 冷（cyan） */
+const HIT_COLOR = semantic.hot;
+const MISS_COLOR = semantic.cold;
 
+/** 均线：MA5 = amber（原型）/ MA10 = red / MA20 = cyan（原型） */
 const MA_COLORS: Record<string, string> = {
-  '5': '#60a5fa',
-  '10': '#34d399',
-  '20': '#f472b6',
+  '5': palette.amber,
+  '10': semantic.hot,
+  '20': semantic.cold,
 };
 
 const MA_LABELS: Record<string, string> = {
@@ -25,8 +28,10 @@ const MA_LABELS: Record<string, string> = {
   '20': 'MA20',
 };
 
-const AXIS_COLOR = 'rgba(140,140,150,0.35)';
-const LABEL_COLOR = '#8a8f98';
+/** 网格线 / 坐标轴线 */
+const AXIS_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
 
 export function TrendChart({
   points,
@@ -134,7 +139,7 @@ export function TrendChart({
             x={pad.left - 4}
             y={yScale(t) + 3}
             fontSize={8}
-            fill={LABEL_COLOR}
+            fill={TICK_COLOR}
             textAnchor="end"
           >
             {t}
@@ -221,7 +226,7 @@ export function TrendChart({
             x={xFor(i)}
             y={height - 6}
             fontSize={9}
-            fill={LABEL_COLOR}
+            fill={TICK_COLOR}
             textAnchor="middle"
           >
             {label}

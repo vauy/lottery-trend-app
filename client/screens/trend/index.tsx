@@ -1,24 +1,54 @@
 /**
  * 走势页 —— 选号 + 出次 + 算一次/算几次 + 3 种图表切换 + 横屏优化。
+ * 视觉对齐 prototype/：深色 shell + Panel / Field / DigitGrid / Chip / Segmented / SubTabs / BottomBar。
  */
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
-import { DigitSelectorMulti } from '@/components/DigitSelectorMulti';
 import { StockChart } from '@/components/charts/StockChart';
 import { OmissionLineChart } from '@/components/charts/OmissionLineChart';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import type { TemperatureStatus } from '@/lib/lottery/types';
+import {
+  BottomBar,
+  Chip,
+  DigitGrid,
+  Field,
+  Panel,
+  Segmented,
+  StatPill,
+  SubTabs,
+  type DigitMark,
+} from '@/components/ui/Kit';
+import { fontSize as fs, palette, radius, semantic, space } from '@/lib/theme';
 
 const COUNT_OPTIONS = [30, 60, 120, 300];
 const COUNT_RANGE = [0, 1, 2, 3];
+const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 type ChartMode = 'frequency' | 'omission' | 'omissionLine';
+type CountMode = 'once' | 'multi';
+
+const CHART_TABS: { id: ChartMode; label: string }[] = [
+  { id: 'frequency', label: '频率K线' },
+  { id: 'omission', label: '遗漏K线' },
+  { id: 'omissionLine', label: '遗漏图' },
+];
 
 export default function TrendScreen() {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const isLandscape = screenW > screenH;
   const chartHeight = isLandscape ? Math.floor(screenH * 0.65) : 300;
+  const insets = useSafeAreaInsets();
 
   const [count, setCount] = useState(120);
   const [pendingDigits, setPendingDigits] = useState<Set<number>>(new Set());
@@ -100,163 +130,216 @@ export default function TrendScreen() {
   };
 
   const tempMap: Record<number, TemperatureStatus> = {};
+  const marks: Record<number, DigitMark> = {};
+  for (const d of Object.keys(tempMap)) {
+    const t = tempMap[Number(d)];
+    marks[Number(d)] = t === 'hot' ? 'hot' : t === 'cold' ? 'cold' : 'none';
+  }
+
+  const canPlot = pendingDigits.size > 0 && pendingCounts.size > 0;
+  const selectedDigitsText = Array.from(selectedDigits).join(',');
+  const selectedCountsText = Array.from(selectedCounts).join(',');
+
+  const chartTitle =
+    chartMode === 'frequency'
+      ? `频率 K 线（覆盖率 ${(coverage * 100).toFixed(2)}%）`
+      : chartMode === 'omission'
+        ? `遗漏 K 线（当前遗漏 ${currentMiss}）`
+        : `遗漏图（当前遗漏 ${currentMiss}）`;
+
+  const bar = (
+    <BottomBar
+      vertical={isLandscape}
+      primaryLabel={`出 图（已选 ${pendingDigits.size} 个号码）`}
+      onPrimary={() => {
+        if (!canPlot) return;
+        handlePlot();
+      }}
+      hint={
+        canPlot
+          ? `出次 ${Array.from(pendingCounts).join(',')} · ${countOnce ? '算一次' : '算几次'} · 下拉可刷新数据`
+          : '请选择号码与出次后点击「出图」'
+      }
+    />
+  );
 
   return (
-    <Screen safeAreaEdges={['top', 'left', 'right']}>
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-      >
-        <View className="mb-2">
-          <Text className="text-lg font-bold text-foreground">福彩3D 走势分析</Text>
-          <Text className="text-xs text-muted mt-1">
-            最近 {count} 期 · 数据源：{source === 'network' ? '已联网更新' : source === 'cache' ? '本地缓存' : '内置数据'}
-            {isLandscape ? ' · 横屏' : ''}
-          </Text>
-        </View>
-
-        {/* 期数 */}
-        <View className="flex-row gap-2 mb-2">
-          {COUNT_OPTIONS.map((o) => (
-            <Pressable
-              key={o}
-              onPress={() => setCount(o)}
-              className={`flex-1 py-1.5 rounded border ${o === count ? 'bg-accent border-accent' : 'bg-white border-border'}`}
-            >
-              <Text className={`text-xs text-center ${o === count ? 'text-accent-foreground font-semibold' : 'text-foreground'}`}>
-                {o}期
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {/* 选号 */}
-        <View className="bg-white rounded-xl border border-border p-2 mb-2">
-          <Text className="text-xs text-muted mb-1">选号（可多选）</Text>
-          <DigitSelectorMulti
-            digits={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
-            selected={pendingDigits}
-            onToggle={togglePendingDigit}
-            temperatureMap={tempMap}
-          />
-        </View>
-
-        {/* 出次 */}
-        <View className="mb-2">
-          <Text className="text-xs text-muted mb-1">出现次数（可多选）</Text>
-          <View className="flex-row gap-2">
-            {COUNT_RANGE.map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => togglePendingCount(c)}
-                className={`flex-1 py-1.5 rounded border ${pendingCounts.has(c) ? 'bg-accent border-accent' : 'bg-white border-border'}`}
-              >
-                <Text className={`text-sm text-center ${pendingCounts.has(c) ? 'text-accent-foreground font-semibold' : 'text-foreground'}`}>
-                  {c}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        {/* 算一次/算几次 */}
-        <View className="flex-row gap-2 mb-2">
-          <Pressable
-            onPress={() => setCountOnce(true)}
-            className={`flex-1 py-1.5 rounded border ${countOnce ? 'bg-accent border-accent' : 'bg-white border-border'}`}
-          >
-            <Text className={`text-sm text-center ${countOnce ? 'text-accent-foreground font-semibold' : 'text-foreground'}`}>
-              算一次
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setCountOnce(false)}
-            className={`flex-1 py-1.5 rounded border ${!countOnce ? 'bg-accent border-accent' : 'bg-white border-border'}`}
-          >
-            <Text className={`text-sm text-center ${!countOnce ? 'text-accent-foreground font-semibold' : 'text-foreground'}`}>
-              算几次
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* 出图 */}
-        <Pressable
-          onPress={handlePlot}
-          disabled={pendingDigits.size === 0 || pendingCounts.size === 0}
-          className={`rounded-lg py-2.5 items-center mb-3 ${pendingDigits.size === 0 || pendingCounts.size === 0 ? 'bg-gray-300' : 'bg-accent'}`}
+    <Screen
+      safeAreaEdges={['top', 'left', 'right']}
+      backgroundColor={semantic.pageBg}
+      statusBarStyle="light"
+    >
+      <View style={styles.root}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
         >
-          <Text className={`text-base font-bold ${pendingDigits.size === 0 || pendingCounts.size === 0 ? 'text-gray-500' : 'text-accent-foreground'}`}>
-            出图（已选 {pendingDigits.size} 个号码）
-          </Text>
-        </Pressable>
+          {/* 品牌栏 */}
+          <View style={styles.brand}>
+            <View style={styles.logo}>
+              <Text style={styles.logoText}>奇</Text>
+            </View>
+            <View style={styles.brandText}>
+              <Text style={styles.h1}>福彩3D 走势分析</Text>
+              <Text style={styles.sub}>
+                最近 {count} 期 · {isLandscape ? '横屏' : '竖屏'}
+              </Text>
+            </View>
+            <StatPill>
+              <Text style={styles.pillText}>
+                数据源{' '}
+                <Text style={styles.pillValue}>
+                  {source === 'network' ? '已联网更新' : source === 'cache' ? '本地缓存' : '内置数据'}
+                </Text>
+              </Text>
+            </StatPill>
+          </View>
 
-        {loading ? (
-          <View className="items-center py-20">
-            <ActivityIndicator />
-            <Text className="text-muted mt-3">正在加载…</Text>
-          </View>
-        ) : error ? (
-          <View className="items-center py-20">
-            <Text className="text-danger">加载失败：{error}</Text>
-          </View>
-        ) : selectedDigits.size === 0 || trendPoints.length === 0 ? (
-          <View className="items-center py-20">
-            <Text className="text-muted">请选择号码后点击「出图」</Text>
-          </View>
-        ) : (
-          <View className="bg-white rounded-xl border border-border p-3 mb-4">
-            {/* 三个 Tab */}
-            <View className="flex-row bg-surface-secondary rounded-lg p-0.5 mb-2">
-              <Pressable
-                onPress={() => setChartMode('frequency')}
-                className={`flex-1 py-1.5 rounded-md items-center ${chartMode === 'frequency' ? 'bg-white shadow-sm' : ''}`}
-              >
-                <Text className={`text-xs ${chartMode === 'frequency' ? 'font-semibold text-foreground' : 'text-muted'}`}>
-                  频率K线
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setChartMode('omission')}
-                className={`flex-1 py-1.5 rounded-md items-center ${chartMode === 'omission' ? 'bg-white shadow-sm' : ''}`}
-              >
-                <Text className={`text-xs ${chartMode === 'omission' ? 'font-semibold text-foreground' : 'text-muted'}`}>
-                  遗漏K线
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setChartMode('omissionLine')}
-                className={`flex-1 py-1.5 rounded-md items-center ${chartMode === 'omissionLine' ? 'bg-white shadow-sm' : ''}`}
-              >
-                <Text className={`text-xs ${chartMode === 'omissionLine' ? 'font-semibold text-foreground' : 'text-muted'}`}>
-                  遗漏图
-                </Text>
-              </Pressable>
+          <View style={[styles.body, isLandscape && styles.bodyRow]}>
+            {/* 左栏：参数 */}
+            <View style={[styles.col, isLandscape && styles.colSide]}>
+              <Panel label="选 号" right={<Text style={styles.panelMeta}>{game.name}</Text>}>
+                <Field caption="期数">
+                  <View style={styles.chipRow}>
+                    {COUNT_OPTIONS.map((o) => (
+                      <Chip
+                        key={o}
+                        label={`${o} 期`}
+                        active={o === count}
+                        onPress={() => setCount(o)}
+                      />
+                    ))}
+                  </View>
+                </Field>
+
+                <Field caption="数字 0–9（可多选）">
+                  <DigitGrid
+                    digits={DIGITS}
+                    selected={Array.from(pendingDigits)}
+                    onToggle={togglePendingDigit}
+                    marks={marks}
+                    columns={5}
+                  />
+                </Field>
+
+                <Field caption="出现次数（可多选）">
+                  <View style={styles.chipRow}>
+                    {COUNT_RANGE.map((c) => (
+                      <Chip
+                        key={c}
+                        label={String(c)}
+                        active={pendingCounts.has(c)}
+                        onPress={() => togglePendingCount(c)}
+                      />
+                    ))}
+                  </View>
+                </Field>
+
+                <Field caption="计数方式">
+                  <Segmented<CountMode>
+                    options={[
+                      { value: 'once', label: '算一次' },
+                      { value: 'multi', label: '算几次' },
+                    ]}
+                    value={countOnce ? 'once' : 'multi'}
+                    onChange={(v) => setCountOnce(v === 'once')}
+                    equalWidth
+                  />
+                </Field>
+              </Panel>
+
+              {isLandscape ? bar : null}
             </View>
 
-            <Text className="text-sm font-semibold text-foreground mb-1">
-              {chartMode === 'frequency' && `频率 K 线（覆盖率 ${(coverage * 100).toFixed(2)}%）`}
-              {chartMode === 'omission' && `遗漏 K 线（当前遗漏 ${currentMiss}）`}
-              {chartMode === 'omissionLine' && `遗漏图（当前遗漏 ${currentMiss}）`}
-            </Text>
-            <Text className="text-[10px] text-muted mb-2">
-              命中 {hitCount} / {trendPoints.length} 期 · 选中数字 {Array.from(selectedDigits).join(',')} · 出次 {Array.from(selectedCounts).join(',')} · {countOnce ? '算一次' : '算几次'}
-            </Text>
-
-            {chartMode === 'omissionLine' ? (
-              <OmissionLineChart points={trendPoints} height={chartHeight + 60} />
-            ) : (
-              <StockChart
-                points={trendPoints}
-                title=""
-                height={chartHeight}
-                mode={chartMode}
-                coverage={coverage}
-              />
-            )}
+            {/* 右栏：图表 */}
+            <View style={styles.col}>
+              {loading ? (
+                <View style={styles.state}>
+                  <ActivityIndicator color={semantic.brand} />
+                  <Text style={styles.stateText}>正在加载…</Text>
+                </View>
+              ) : error ? (
+                <View style={styles.state}>
+                  <Text style={styles.stateError}>加载失败：{error}</Text>
+                </View>
+              ) : selectedDigits.size === 0 || trendPoints.length === 0 ? (
+                <View style={styles.state}>
+                  <Text style={styles.stateText}>请选择号码后点击「出图」</Text>
+                </View>
+              ) : (
+                <Panel
+                  label={chartTitle}
+                  right={
+                    <Text style={styles.panelMeta}>
+                      命中 {hitCount}/{trendPoints.length}
+                    </Text>
+                  }
+                >
+                  <SubTabs<ChartMode>
+                    items={CHART_TABS}
+                    value={chartMode}
+                    onChange={setChartMode}
+                  />
+                  <Text style={styles.chartMeta}>
+                    命中 {hitCount} / {trendPoints.length} 期 · 选中数字 {selectedDigitsText} · 出次{' '}
+                    {selectedCountsText} · {countOnce ? '算一次' : '算几次'}
+                  </Text>
+                  {chartMode === 'omissionLine' ? (
+                    <OmissionLineChart points={trendPoints} height={chartHeight + 60} />
+                  ) : (
+                    <StockChart
+                      points={trendPoints}
+                      title=""
+                      height={chartHeight}
+                      mode={chartMode}
+                      coverage={coverage}
+                    />
+                  )}
+                </Panel>
+              )}
+            </View>
           </View>
-        )}
-      </ScrollView>
+        </ScrollView>
+
+        {isLandscape ? null : <View style={{ paddingBottom: insets.bottom }}>{bar}</View>}
+      </View>
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: semantic.pageBg },
+  scrollView: { flex: 1 },
+  scroll: { padding: space.lg, paddingBottom: space.xl, gap: space.lg },
+
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logo: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.sm,
+    backgroundColor: semantic.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoText: { fontWeight: '800', color: semantic.onBrand, fontSize: fs.md },
+  brandText: { flex: 1 },
+  h1: { fontSize: fs.lg, fontWeight: '700', letterSpacing: 0.6, lineHeight: 20 },
+  sub: { fontSize: fs.micro, color: semantic.textFaint, letterSpacing: 1.2 },
+  pillText: { fontSize: fs.micro, color: semantic.textFaint },
+  pillValue: { color: palette.cyan, fontWeight: '600' },
+
+  body: { gap: space.lg },
+  bodyRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  col: { flex: 1, gap: space.lg },
+  colSide: { flex: 0, width: 300, maxWidth: '34%' },
+
+  panelMeta: { fontSize: fs.micro, color: semantic.textFaint },
+  chartMeta: { fontSize: fs.micro, color: semantic.textFaint, marginTop: space.sm },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+
+  state: { alignItems: 'center', paddingVertical: 80, gap: space.sm },
+  stateText: { fontSize: fs.sm, color: semantic.textDim },
+  stateError: { fontSize: fs.sm, color: semantic.hot },
+});

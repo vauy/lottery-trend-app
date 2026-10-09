@@ -12,13 +12,21 @@ import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ECHARTS_SOURCE } from '@/lib/echartsSource';
 import type { TargetPoint } from '@/lib/lottery/targets';
+import { palette, semantic } from '@/lib/theme';
 
 type AggPoint = { issue: string; o: number; c: number };
 
-const RED = '#e5484d';
-const CYAN = '#22d3ee';
-const BOLL_COLOR = '#7c9cf5';
-const MID_COLOR = '#fbbf24';
+/** 与原型 drawFreqK 对齐：涨/热 = red，跌/冷 = cyan，布林带 = accent，中轨 = amber */
+const UP = semantic.hot;
+const DOWN = semantic.cold;
+const BOLL_COLOR = palette.accent;
+const MID_COLOR = palette.amber;
+/** 坐标轴线 / 网格线 */
+const AXIS_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
+/** 标题文字 */
+const TITLE_COLOR = palette.inkDim;
 
 function aggregate(series: TargetPoint[], period: number): AggPoint[] {
   if (period <= 1) {
@@ -90,7 +98,7 @@ export function EChartsFreqKChart({
     const n = points.length;
 
     if (n === 0) {
-      return '<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:12px;font-family:sans-serif">暂无数据</body></html>';
+      return `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:${TICK_COLOR};font-size:12px;font-family:sans-serif">暂无数据</body></html>`;
     }
 
     const cVals = points.map((p) => p.c);
@@ -130,7 +138,7 @@ export function EChartsFreqKChart({
           return {
             type: 'rect',
             shape: { x: x - halfW, y: top, width: ${barWidth}, height: h },
-            style: { fill: c >= o ? '${RED}' : '${CYAN}' }
+            style: { fill: c >= o ? '${UP}' : '${DOWN}' }
           };
         }`
       : // 有影线版本（用 candlestick 的绘制逻辑）
@@ -147,8 +155,8 @@ export function EChartsFreqKChart({
           return {
             type: 'group',
             children: [
-              { type: 'rect', shape: { x: x - 0.5, y: top - 6, width: 1, height: bottom - top + 12 }, style: { fill: '#1f2937' } },
-              { type: 'rect', shape: { x: x - halfW, y: top, width: ${barWidth}, height: Math.max(1.5, bottom - top) }, style: { fill: c >= o ? '${RED}' : '${CYAN}' } }
+              { type: 'rect', shape: { x: x - 0.5, y: top - 6, width: 1, height: bottom - top + 12 }, style: { fill: '${AXIS_COLOR}' } },
+              { type: 'rect', shape: { x: x - halfW, y: top, width: ${barWidth}, height: Math.max(1.5, bottom - top) }, style: { fill: c >= o ? '${UP}' : '${DOWN}' } }
             ]
           };
         }`;
@@ -180,22 +188,22 @@ export function EChartsFreqKChart({
 
     const optionStr = `{
       animation: false,
-      backgroundColor: '#ffffff',
+      backgroundColor: 'transparent',
       grid: { left: 36, right: 16, top: 22, bottom: 22 },
-      graphic: ${targetLabel ? `[{"type":"text","left":"center","top":4,"style":{"text":${JSON.stringify(targetLabel)},"fontSize":10,"fill":"#8a8f98"}}]` : "null"},
+      graphic: ${targetLabel ? `[{"type":"text","left":"center","top":4,"style":{"text":${JSON.stringify(targetLabel)},"fontSize":10,"fill":"${TITLE_COLOR}"}}]` : "null"},
       xAxis: {
         type: 'category',
         data: ${JSON.stringify(xLabels)},
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: 'rgba(140,140,150,0.35)' } },
-        axisLabel: { fontSize: 8, color: '#8a8f98', interval: 0 }
+        axisLine: { lineStyle: { color: '${AXIS_COLOR}' } },
+        axisLabel: { fontSize: 8, color: '${TICK_COLOR}', interval: 0 }
       },
       yAxis: {
         type: 'value',
         min: ${yMin.toFixed(4)},
         max: ${yMax.toFixed(4)},
-        splitLine: { lineStyle: { color: 'rgba(140,140,150,0.15)' } },
-        axisLabel: { fontSize: 8, color: '#8a8f98' }
+        splitLine: { lineStyle: { color: '${AXIS_COLOR}' } },
+        axisLabel: { fontSize: 8, color: '${TICK_COLOR}' }
       },
       series: [
         {

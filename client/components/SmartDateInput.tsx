@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import dayjs from 'dayjs';
+import { alpha, palette, semantic } from '@/lib/theme';
 import { FontAwesome6 } from '@expo/vector-icons';
 
 // --------------------------------------------------------
@@ -154,7 +155,7 @@ export const SmartDateInput = ({
         <FontAwesome6 
           name={iconName} 
           size={iconSize} 
-          color={iconColor || (value ? '#4B5563' : '#9CA3AF')} 
+          color={iconColor || (value ? semantic.textDim : semantic.textFaint)}
           style={styles.icon}
         />
       </TouchableOpacity>
@@ -192,20 +193,20 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151', // Gray 700
+    color: semantic.textDim,
     marginBottom: 8,
     marginLeft: 2,
   },
   inputBox: {
     height: 52, // 增加高度提升触控体验
-    backgroundColor: '#FFFFFF',
+    backgroundColor: semantic.controlBg,
     borderRadius: 12, // 更圆润的角
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB', // Gray 200
+    borderColor: semantic.panelBorder,
     // 增加轻微阴影提升层次感 (iOS)
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -215,16 +216,16 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   inputBoxError: {
-    borderColor: '#EF4444', // Red 500
-    backgroundColor: '#FEF2F2', // Red 50
+    borderColor: palette.red,
+    backgroundColor: alpha(palette.red, 0.12),
   },
   text: {
     fontSize: 16,
-    color: '#111827', // Gray 900
+    color: semantic.text,
     flex: 1,
   },
   placeholder: {
-    color: '#9CA3AF', // Gray 400 - 标准占位符颜色
+    color: semantic.textFaint,
   },
   icon: {
     marginLeft: 12,
@@ -233,6 +234,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginLeft: 2,
     fontSize: 12,
-    color: '#EF4444',
+    color: palette.red,
   }
 });

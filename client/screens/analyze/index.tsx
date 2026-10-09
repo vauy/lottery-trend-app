@@ -1,6 +1,7 @@
 /**
- * 主页分析 —— 9 个 Tab，横屏铺满。
- * 复式 Tab 支持「定位 / 不定位」切换。
+ * 主页分析 —— 14 个子页签，手机优先版式。
+ * 视觉骨架与 prototype/ 1:1：brand / 彩种 / 主导航 / 子页签 / content / bottombar。
+ * 所有颜色取自 @/lib/theme，容器与版式取自 @/components/ui/Kit。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -9,11 +10,13 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/components/Screen';
 import { EChartsFreqKChart } from '@/components/charts/EChartsFreqKChart';
@@ -24,8 +27,34 @@ import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
 import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
-import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode } from '@/lib/lottery/targets';
+import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
+import { buildDigitStats } from '@/lib/lottery/analysis';
+import {
+  BottomBar,
+  ChartCard,
+  Chip,
+  DigitGrid,
+  Field,
+  Legend,
+  Panel,
+  Segmented,
+  StatPill,
+  SubTabs,
+  TongCell,
+  TongGrid,
+  type DigitMark,
+} from '@/components/ui/Kit';
+import {
+  alpha,
+  chartSize,
+  fontSize as fs,
+  palette,
+  radius,
+  semantic,
+  space,
+  touch,
+} from '@/lib/theme';
 
 type ChartMode = 'freq' | 'omissionK' | 'omissionLine' | 'omissionLine2';
 type TabId =
@@ -48,6 +77,37 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'fushi', label: '复式' },
   { id: 'kl8seq', label: '连号' },
   { id: 'kl8dt', label: '胆拖' },
+];
+
+/** 原型 .gamebar 里的彩种列表 */
+const GAMES: { id: string; label: string }[] = [
+  { id: 'fc3d', label: '福彩3D' },
+  { id: 'pl3', label: '排列3' },
+  { id: 'pl5', label: '排列5' },
+  { id: 'kl8', label: '快乐8' },
+];
+
+/** 原型 .prinav 主导航分段 */
+type PrinavId = 'analyze' | 'group';
+const PRINAV_OPTIONS: { value: PrinavId; label: string }[] = [
+  { value: 'analyze', label: '分析' },
+  { value: 'group', label: '组号 ▲' },
+];
+const PRINAV_VALUE: PrinavId = 'analyze';
+
+/** 图表卡片标题 / 副标题（对齐原型 .chart-card .ctitle） */
+const CHART_META: Record<ChartMode, { title: string; meta: string }> = {
+  freq: { title: '频率K线', meta: 'diff 累计实出−理论' },
+  omissionK: { title: '遗漏K线', meta: '爬楼梯遗漏' },
+  omissionLine: { title: '遗漏图', meta: '逐期遗漏值' },
+  omissionLine2: { title: '二阶遗漏图', meta: '逐期遗漏值' },
+};
+
+const CHART_MODES: { id: ChartMode; label: string }[] = [
+  { id: 'freq', label: '频率K' },
+  { id: 'omissionK', label: '遗漏K' },
+  { id: 'omissionLine', label: '遗漏图' },
+  { id: 'omissionLine2', label: '二阶遗漏图' },
 ];
 
 const POS_OPTIONS: Position[] = ['any', 'bai', 'shi', 'ge'];
@@ -159,6 +219,7 @@ const MAX_BARS = 200;
 
 export default function AnalyzeScreen() {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ codes?: string }>();
 
   const [gameId, setGameId] = useState('fc3d');
@@ -465,6 +526,26 @@ export default function AnalyzeScreen() {
     [series],
   );
 
+  /** 当前遗漏（原型 .status-pill 用） */
+  const currentOmission = omissionSeries.length > 0
+    ? omissionSeries[omissionSeries.length - 1].omission
+    : 0;
+
+  /** 数字冷热标记：原型 heatMark()，热号红环 / 冷号青环 */
+  const digitMarks = useMemo<Record<number, DigitMark>>(() => {
+    const marks: Record<number, DigitMark> = {};
+    if (records.length === 0) return marks;
+    try {
+      const stats = buildDigitStats(records, DIGITS, records.length, DD, V);
+      for (const s of stats) {
+        marks[s.digit] = s.temperature === 'hot' ? 'hot' : s.temperature === 'cold' ? 'cold' : 'none';
+      }
+    } catch {
+      /* 数据不足时不做标记 */
+    }
+    return marks;
+  }, [records, DD, V]);
+
   const applyCount = () => {
     const n = parseInt(countInput, 10);
     if (!Number.isNaN(n) && n >= 50 && n <= 10000) {
@@ -490,19 +571,17 @@ export default function AnalyzeScreen() {
     set(arr.includes(d) ? arr.filter((x) => x !== d) : [...arr, d]);
   };
 
-  const btnStyle = (active: boolean) => ({
-    paddingHorizontal: 6,
-    height: 22,
-    borderRadius: 4,
-    backgroundColor: active ? '#2563eb' : '#f3f4f6',
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-  });
-  const txtColor = (active: boolean) => ({
-    fontSize: 11,
-    color: active ? '#ffffff' : '#111827',
-    fontWeight: active ? ('700' as const) : ('400' as const),
-  });
+  // ============ 响应式：横屏 / 宽屏 ============
+  const isLandscape = width >= 860 || width > height;
+  const contentW = Math.max(240, width - space.lg * 2);
+  const chartH = isLandscape ? chartSize.hLandscape : chartSize.h;
+  const chartColW = isLandscape ? Math.floor((contentW - space.lg) / 2) : contentW;
+  const chartW = Math.max(160, chartColW - 24);
+  const tongW = Math.max(120, Math.floor(contentW * 0.48) - 12);
+
+  // 图表可用高度（同屏放大 / 振幅图用）
+  const TOP_BAR_H = topCollapsed ? 30 : 180;
+  const availH = Math.max(140, height - TOP_BAR_H);
 
   // ============ 行渲染 ============
   const runFullFetch = () => {
@@ -560,78 +639,19 @@ export default function AnalyzeScreen() {
     );
   };
 
-  const renderTabBar = () => (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-      <Pressable
-        onPress={() => setGameMenuOpen(true)}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, height: 22, borderRadius: 4, backgroundColor: '#2563eb' }}
-      >
-        <Text style={{ fontSize: 11, color: '#fff', fontWeight: '700' }}>
-          {gameId === 'fc3d' ? '福彩3D' : gameId === 'pl3' ? '排列3' : gameId === 'pl5' ? '排列5' : '快乐8'}
-        </Text>
-        <Text style={{ fontSize: 9, color: '#fff' }}>▼</Text>
-      </Pressable>
-      {(gameId === 'kl8'
-        ? TABS.filter((t) => ['common', 'combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id))
-        : TABS.filter((t) => !['combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id))
-      ).map((t) => (
-        <Pressable key={t.id} onPress={() => {
-                    setTab(t.id);
-                    setCountInput(String(countMap[t.id] ?? 500));
-                    setCompareTargets(null);
-                    if (t.id === 'amp') {
-                      setCountInput(String(countMap.amp ?? 80));
-                    }
-                  }} style={btnStyle(tab === t.id)}>
-          <Text style={txtColor(tab === t.id)}>{t.label}</Text>
-        </Pressable>
-      ))}
-{/* 形态按钮（仅 3D / 排列3） */}
-{(gameId === 'fc3d' || gameId === 'pl3') && (
-  <>
-    <Text style={{ fontSize: 9, color: '#888', marginLeft: 4 }}>形态</Text>
-    <Pressable
-      onPress={() => setShapeMainMode(shapeMainMode === 'zuxuan' ? 'zhixuan' : 'zuxuan')}
-      style={btnStyle(shapeMainMode === 'zuxuan')}>
-      <Text style={txtColor(shapeMainMode === 'zuxuan')}>组选</Text>
-    </Pressable>
-    {([
-      { id: 'zusan' as const, label: '组三' },
-      { id: 'zuliu' as const, label: '组六' },
-    ]).map((o) => (
-      <Pressable key={o.id}
-        onPress={() => setShapeFilters((prev) => prev.includes(o.id) ? prev.filter((x) => x !== o.id) : [...prev, o.id])}
-        style={btnStyle(shapeFilters.includes(o.id))}>
-        <Text style={txtColor(shapeFilters.includes(o.id))}>{o.label}</Text>
-      </Pressable>
-    ))}
-  </>
-)}
-      <TextInput
-        value={countInput}
-        onChangeText={setCountInput}
-        onEndEditing={applyCount}
-        onSubmitEditing={applyCount}
-        keyboardType="numeric"
-        style={{
-          width: 60, height: 22, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 4,
-          paddingHorizontal: 4, paddingVertical: 0, fontSize: 11, lineHeight: 14,
-          color: '#111827', textAlign: 'center', backgroundColor: '#ffffff',
-        }}
-        placeholderTextColor="#9ca3af"
-        placeholder="500"
-      />
-      <Pressable onPress={applyCount} style={btnStyle(true)}>
-        <Text style={txtColor(true)}>应用</Text>
-      </Pressable>
-      <Pressable onPress={() => void refresh()} disabled={refreshing} style={btnStyle(false)}>
-        <Text style={txtColor(false)}>{refreshing ? '刷新中…' : '刷新'}</Text>
-      </Pressable>
-    <Text style={{ fontSize: 9, color: '#888', marginLeft: 4 }} numberOfLines={1}>
-      {source} {records.length}期 / 共{allRecords.length}期
-    </Text>
-    </View>
-  );
+  /** 子页签切换（保留原 tab 切换副作用） */
+  const onTabChange = (t: TabId) => {
+    setTab(t);
+    setCountInput(String(countMap[t] ?? 500));
+    setCompareTargets(null);
+    if (t === 'amp') {
+      setCountInput(String(countMap.amp ?? 80));
+    }
+  };
+
+  const visibleTabs: { id: TabId; label: string }[] = gameId === 'kl8'
+    ? TABS.filter((t) => ['common', 'combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id))
+    : TABS.filter((t) => !['combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id));
 
   const TYPE_OPTIONS = [
     { id: 'draw', label: '开奖号' },
@@ -642,60 +662,36 @@ export default function AnalyzeScreen() {
   ];
 
   const renderTypeRow = () => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-      <Text style={{ fontSize: 9, color: '#888' }}>类型</Text>
-      {TYPE_OPTIONS.map((t) => {
-        const active = type === t.id;
-        return (
-          <Pressable
+    <Field caption="类型">
+      <View style={styles.chipRow}>
+        {TYPE_OPTIONS.map((t) => (
+          <Chip
             key={t.id}
+            label={t.label}
+            active={type === t.id}
             onPress={() => { setType(t.id); setDan([]); setPei([]); }}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}
-          >
-            <View style={{
-              width: 10, height: 10, borderRadius: 5,
-              backgroundColor: active ? '#2563eb' : 'transparent',
-              borderWidth: active ? 0 : 1,
-              borderColor: '#999',
-            }} />
-            <Text style={{ fontSize: 11, color: active ? '#2563eb' : '#111827', fontWeight: active ? '700' : '400' }}>
-              {t.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
+          />
+        ))}
+      </View>
+    </Field>
   );
 
   const renderDigitRow = (
     label: string, arr: number[], setArr: (v: number[]) => void, extra?: React.ReactNode,
   ) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-      <Text style={{ fontSize: 9, color: '#888', width: 24 }}>{label}</Text>
-      {((tab === 'dan' || tab === 'dantuo') && type === 'pair' ? [0, 1, 2, 3, 4] : DIGITS).map((d) => (
-        <Pressable
-          key={`${label}-${d}`}
-          onPress={() => toggle(arr, setArr, d)}
-          style={{
-            width: 22, height: 22, borderRadius: 4,
-            backgroundColor: arr.includes(d) ? '#2563eb' : '#f3f4f6',
-            justifyContent: 'center', alignItems: 'center',
-          }}
-        >
-          <Text style={{
-            fontSize: 11,
-            color: arr.includes(d) ? '#ffffff' : '#111827',
-            fontWeight: arr.includes(d) ? '700' : '400',
-          }}>
-            {d}
-          </Text>
-        </Pressable>
-      ))}
-      <Pressable onPress={() => { setArr([]); setExternalCodes(null); }} style={btnStyle(false)}>
-        <Text style={txtColor(false)}>清</Text>
-      </Pressable>
-      {extra}
-    </View>
+    <Field caption={label}>
+      <DigitGrid
+        digits={(tab === 'dan' || tab === 'dantuo') && type === 'pair' ? [0, 1, 2, 3, 4] : DIGITS}
+        selected={arr}
+        onToggle={(d) => toggle(arr, setArr, d)}
+        marks={digitMarks}
+        columns={6}
+      />
+      <View style={styles.chipRow}>
+        <Chip label="清" active={false} onPress={() => { setArr([]); setExternalCodes(null); }} />
+        {extra}
+      </View>
+    </Field>
   );
 
   const renderKl8Dt = () => {
@@ -725,8 +721,8 @@ export default function AnalyzeScreen() {
     const renderGrid = (active: number[], onToggle: (v: number) => void, disabled: number[] = []) => (
       <View>
         {rows.map((row, ri) => (
-          <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-            <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
+          <View key={ri} style={styles.kl8Row}>
+            <Text style={styles.kl8RowLabel}>
               {String(row[0]).padStart(2, '0')}-
             </Text>
             {row.map((v) => {
@@ -735,8 +731,16 @@ export default function AnalyzeScreen() {
               return (
                 <Pressable key={v}
                   onPress={() => { if (!isDisabled) onToggle(v); }}
-                  style={{ flex: 1, height: 22, borderRadius: 3, backgroundColor: isActive ? '#2563eb' : (isDisabled ? '#e5e7eb' : '#f3f4f6'), justifyContent: 'center', alignItems: 'center', opacity: isDisabled ? 0.4 : 1 }}>
-                  <Text style={{ fontSize: 9, color: isActive ? '#fff' : (isDisabled ? '#9ca3af' : '#111827'), fontWeight: isActive ? '700' : '400' }}>
+                  style={[
+                    styles.kl8Cell,
+                    isActive && styles.kl8CellOn,
+                    isDisabled && styles.kl8CellOff,
+                  ]}>
+                  <Text style={[
+                    styles.kl8CellText,
+                    isActive && styles.kl8CellTextOn,
+                    isDisabled && styles.kl8CellTextOff,
+                  ]}>
                     {String(v).padStart(2, '0')}
                   </Text>
                 </Pressable>
@@ -749,65 +753,51 @@ export default function AnalyzeScreen() {
     return (
       <>
         {/* 胆行 */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 2 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>胆 码</Text>
-          <Pressable
-            onPress={() => setKl8DtDanMenuOpen(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 26, borderRadius: 4, backgroundColor: '#2563eb' }}
-          >
-            <Text style={{ fontSize: 12, color: '#fff', fontWeight: '700' }}>
-              {kl8DtDan.length > 0 ? kl8DtDan.map((n) => String(n).padStart(2, '0')).join(' ') : '点此选胆'}
-            </Text>
-            <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
-          </Pressable>
-          <Text style={{ fontSize: 9, color: '#888' }}>中</Text>
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
-            const active = kl8DtDanCounts.includes(n);
-            return (
-              <Pressable key={n}
-                onPress={() => setKl8DtDanCounts((prev) => prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n])}
-                style={btnStyle(active)}>
-                <Text style={txtColor(active)}>{n}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Field caption="胆码（必含）">
+          <View style={styles.rowBetween}>
+            <Chip
+              label={kl8DtDan.length > 0 ? kl8DtDan.map((n) => String(n).padStart(2, '0')).join(' ') : '点此选胆'}
+              active={kl8DtDan.length > 0}
+              onPress={() => setKl8DtDanMenuOpen(true)}
+            />
+          </View>
+          <Text style={styles.fieldNote}>中</Text>
+          <DigitGrid
+            digits={DIGITS}
+            selected={kl8DtDanCounts}
+            onToggle={(n) => setKl8DtDanCounts((prev) => prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n])}
+            columns={6}
+          />
+        </Field>
 
         {/* 拖行 */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 2 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>拖 码</Text>
-          <Pressable
-            onPress={() => setKl8DtTuoMenuOpen(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 26, borderRadius: 4, backgroundColor: '#2563eb' }}
-          >
-            <Text style={{ fontSize: 12, color: '#fff', fontWeight: '700' }}>
-              {kl8DtTuo.length > 0 ? kl8DtTuo.map((n) => String(n).padStart(2, '0')).join(' ') : '点此选拖'}
-            </Text>
-            <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
-          </Pressable>
-          <Text style={{ fontSize: 9, color: '#888' }}>中</Text>
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((n) => {
-            const active = kl8DtTuoCounts.includes(n);
-            return (
-              <Pressable key={n}
-                onPress={() => toggleTuoCount(n)}
-                style={btnStyle(active)}>
-                <Text style={txtColor(active)}>{n}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Field caption="拖码（至少含一）">
+          <View style={styles.rowBetween}>
+            <Chip
+              label={kl8DtTuo.length > 0 ? kl8DtTuo.map((n) => String(n).padStart(2, '0')).join(' ') : '点此选拖'}
+              active={kl8DtTuo.length > 0}
+              onPress={() => setKl8DtTuoMenuOpen(true)}
+            />
+          </View>
+          <Text style={styles.fieldNote}>中</Text>
+          <DigitGrid
+            digits={Array.from({ length: 16 }, (_, i) => i)}
+            selected={kl8DtTuoCounts}
+            onToggle={toggleTuoCount}
+            columns={6}
+          />
+        </Field>
 
         {/* 胆码网格弹窗 */}
         <Modal visible={kl8DtDanMenuOpen} transparent animationType="fade" onRequestClose={() => setKl8DtDanMenuOpen(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10, width: '96%' }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#111827', marginBottom: 6, textAlign: 'center' }}>
+          <View style={styles.modalMask}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>
                 选胆码（最多 9 个，已选 {kl8DtDan.length}）
               </Text>
               {renderGrid(kl8DtDan, toggleDan)}
-              <Pressable onPress={() => setKl8DtDanMenuOpen(false)} style={{ marginTop: 8, height: 32, borderRadius: 6, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: '#fff', fontWeight: '700' }}>确定</Text>
+              <Pressable onPress={() => setKl8DtDanMenuOpen(false)} style={styles.modalBtn}>
+                <Text style={styles.modalBtnText}>确定</Text>
               </Pressable>
             </View>
           </View>
@@ -815,14 +805,14 @@ export default function AnalyzeScreen() {
 
         {/* 拖码网格弹窗 */}
         <Modal visible={kl8DtTuoMenuOpen} transparent animationType="fade" onRequestClose={() => setKl8DtTuoMenuOpen(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10, width: '96%' }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#111827', marginBottom: 6, textAlign: 'center' }}>
+          <View style={styles.modalMask}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>
                 选拖码（已选 {kl8DtTuo.length}）
               </Text>
               {renderGrid(kl8DtTuo, toggleTuo, kl8DtDan)}
-              <Pressable onPress={() => setKl8DtTuoMenuOpen(false)} style={{ marginTop: 8, height: 32, borderRadius: 6, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: '#fff', fontWeight: '700' }}>确定</Text>
+              <Pressable onPress={() => setKl8DtTuoMenuOpen(false)} style={styles.modalBtn}>
+                <Text style={styles.modalBtnText}>确定</Text>
               </Pressable>
             </View>
           </View>
@@ -844,49 +834,40 @@ export default function AnalyzeScreen() {
     ];
     return (
       <>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>类 型</Text>
-          {types.map((t) => (
-            <Pressable key={t.id}
-              onPress={() => { setKl8SeqType(t.id); setKl8SeqIndex(0); }}
-              style={btnStyle(kl8SeqType === t.id)}>
-              <Text style={txtColor(kl8SeqType === t.id)}>{t.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>长 度</Text>
-          {[2, 3, 4, 5, 6, 7, 8].map((n) => (
-            <Pressable key={n}
-              onPress={() => { setKl8SeqLen(n); setKl8SeqIndex(0); }}
-              style={btnStyle(kl8SeqLen === n)}>
-              <Text style={txtColor(kl8SeqLen === n)}>{n}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>已 选</Text>
-          <Pressable
-            onPress={() => setKl8SeqMenuOpen(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 26, borderRadius: 4, backgroundColor: '#2563eb' }}
-          >
-            <Text style={{ fontSize: 12, color: '#fff', fontWeight: '700' }}>
-              {kl8SeqCodes.map((n) => String(n).padStart(2, '0')).join(' ')}
+        <Field caption="类型">
+          <Segmented
+            options={types.map((t) => ({ value: t.id, label: t.label }))}
+            value={kl8SeqType}
+            onChange={(v) => { setKl8SeqType(v); setKl8SeqIndex(0); }}
+          />
+        </Field>
+        <Field caption="长度">
+          <Segmented
+            options={[2, 3, 4, 5, 6, 7, 8].map((n) => ({ value: String(n), label: String(n) }))}
+            value={String(kl8SeqLen)}
+            onChange={(v) => { setKl8SeqLen(Number(v)); setKl8SeqIndex(0); }}
+          />
+        </Field>
+        <Field caption="已选">
+          <View style={styles.rowBetween}>
+            <Chip
+              label={kl8SeqCodes.map((n) => String(n).padStart(2, '0')).join(' ')}
+              active
+              onPress={() => setKl8SeqMenuOpen(true)}
+            />
+            <Text style={styles.hint}>
+              （共 {kl8SeqOptions.length} 组 · 第 {kl8SeqIndex + 1} 组）
             </Text>
-            <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
-          </Pressable>
-          <Text style={{ fontSize: 9, color: '#888' }}>
-            （共 {kl8SeqOptions.length} 组 · 第 {kl8SeqIndex + 1} 组）
-          </Text>
-        </View>
+          </View>
+        </Field>
 
         <Modal visible={kl8SeqMenuOpen} transparent animationType="fade" onRequestClose={() => setKl8SeqMenuOpen(false)}>
           <Pressable
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}
+            style={styles.modalMask}
             onPress={() => setKl8SeqMenuOpen(false)}
           >
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 8, width: 240, maxHeight: 360 }}>
-              <Text style={{ fontSize: 11, color: '#888', marginBottom: 6, textAlign: 'center' }}>选择组合</Text>
+            <View style={[styles.modalCard, { width: 240, maxHeight: 360 }]}>
+              <Text style={styles.modalTitle}>选择组合</Text>
               <ScrollView>
                 {kl8SeqOptions.map((opt, i) => {
                   const active = i === kl8SeqIndex;
@@ -894,9 +875,9 @@ export default function AnalyzeScreen() {
                     <Pressable
                       key={i}
                       onPress={() => { setKl8SeqIndex(i); setKl8SeqMenuOpen(false); }}
-                      style={{ paddingVertical: 7, paddingHorizontal: 10, borderRadius: 4, backgroundColor: active ? '#2563eb' : 'transparent' }}
+                      style={[styles.modalOption, active && styles.modalOptionOn]}
                     >
-                      <Text style={{ fontSize: 12, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
+                      <Text style={[styles.modalOptionText, active && styles.modalOptionTextOn]}>
                         {opt.map((n) => String(n).padStart(2, '0')).join(' ')}
                       </Text>
                     </Pressable>
@@ -927,10 +908,10 @@ export default function AnalyzeScreen() {
     };
     return (
       <>
-        <View style={{ marginBottom: 3 }}>
+        <Field caption="号码（最多 20 个）">
           {rows.map((row, ri) => (
-            <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-              <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
+            <View key={ri} style={styles.kl8Row}>
+              <Text style={styles.kl8RowLabel}>
                 {String(row[0]).padStart(2, '0')}-
               </Text>
               {row.map((v) => {
@@ -939,13 +920,9 @@ export default function AnalyzeScreen() {
                   <Pressable
                     key={v}
                     onPress={() => toggleCombo(v)}
-                    style={{
-                      flex: 1, height: 22, borderRadius: 3,
-                      backgroundColor: active ? '#2563eb' : '#f3f4f6',
-                      justifyContent: 'center', alignItems: 'center',
-                    }}
+                    style={[styles.kl8Cell, active && styles.kl8CellOn]}
                   >
-                    <Text style={{ fontSize: 9, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
+                    <Text style={[styles.kl8CellText, active && styles.kl8CellTextOn]}>
                       {String(v).padStart(2, '0')}
                     </Text>
                   </Pressable>
@@ -953,88 +930,50 @@ export default function AnalyzeScreen() {
               })}
             </View>
           ))}
-        </View>
+        </Field>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888' }}>命中</Text>
-          {([
-            { id: 'all' as const, label: '全中' },
-            { id: 'any' as const, label: '任意中1' },
-            { id: 'exact' as const, label: '中N个' },
-          ]).map((o) => (
-            <Pressable
-              key={o.id}
-              onPress={() => setKl8MatchMode(o.id)}
-              style={{
-                paddingHorizontal: 8, height: 22, borderRadius: 4,
-                backgroundColor: kl8MatchMode === o.id ? '#2563eb' : '#f3f4f6',
-                justifyContent: 'center', alignItems: 'center',
-              }}
-            >
-              <Text style={{ fontSize: 11, color: kl8MatchMode === o.id ? '#fff' : '#111827', fontWeight: kl8MatchMode === o.id ? '700' : '400' }}>
-                {o.label}
-              </Text>
-            </Pressable>
-          ))}
+        <Field caption="命中">
+          <Segmented
+            options={[
+              { value: 'all', label: '全中' },
+              { value: 'any', label: '任意中1' },
+              { value: 'exact', label: '中N个' },
+            ]}
+            value={kl8MatchMode}
+            onChange={setKl8MatchMode}
+          />
           {kl8MatchMode === 'exact' && (
             <>
-              <Text style={{ fontSize: 9, color: '#888' }}>N=</Text>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                <Pressable
-                  key={n}
-                  onPress={() => setKl8MatchCount(n)}
-                  style={{
-                    width: 22, height: 22, borderRadius: 4,
-                    backgroundColor: kl8MatchCount === n ? '#2563eb' : '#f3f4f6',
-                    justifyContent: 'center', alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ fontSize: 11, color: kl8MatchCount === n ? '#fff' : '#111827', fontWeight: kl8MatchCount === n ? '700' : '400' }}>
-                    {n}
-                  </Text>
-                </Pressable>
-              ))}
+              <Text style={styles.fieldNote}>N=</Text>
+              <DigitGrid
+                digits={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+                selected={[kl8MatchCount]}
+                onToggle={setKl8MatchCount}
+                columns={6}
+              />
             </>
           )}
-          <View style={{ flex: 1 }} />
-          <Pressable
-            onPress={() => setKl8ComboCodes([])}
-            style={{ paddingHorizontal: 8, height: 22, borderRadius: 4, backgroundColor: '#f3f4f6' }}
-          >
-            <Text style={{ fontSize: 11, color: '#111827' }}>清空</Text>
-          </Pressable>
-          <Text style={{ fontSize: 10, color: kl8ComboCodes.length > 0 ? '#2563eb' : '#888', fontWeight: '700' }}>
-            已选 {kl8ComboCodes.length}
-          </Text>
-        </View>
+          <View style={styles.rowBetween}>
+            <Chip label="清空" active={false} onPress={() => setKl8ComboCodes([])} />
+            <Text style={[styles.hint, kl8ComboCodes.length > 0 && styles.hintOn]}>
+              已选 {kl8ComboCodes.length}
+            </Text>
+          </View>
+        </Field>
       </>
     );
   };
 
   const renderCommon = () => {
     const digitRow = (label: string, maxV: number, cur: number, onSelect: (v: number) => void) => (
-      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-        <Text style={{ fontSize: 9, color: '#888', width: 24 }}>{label}</Text>
-        {Array.from({ length: maxV + 1 }, (_, i) => i).map((v) => (
-          <Pressable
-            key={`${label}-${v}`}
-            onPress={() => { setExternalCodes(null); onSelect(v); }}
-            style={{
-              minWidth: 22, height: 22, borderRadius: 4, paddingHorizontal: 3,
-              backgroundColor: cur === v ? '#2563eb' : '#f3f4f6',
-              justifyContent: 'center', alignItems: 'center',
-            }}
-          >
-            <Text style={{
-              fontSize: 11,
-              color: cur === v ? '#ffffff' : '#111827',
-              fontWeight: cur === v ? '700' : '400',
-            }}>
-              {v}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Field caption={label}>
+        <DigitGrid
+          digits={Array.from({ length: maxV + 1 }, (_, i) => i)}
+          selected={[cur]}
+          onToggle={(v) => { setExternalCodes(null); onSelect(v); }}
+          columns={6}
+        />
+      </Field>
     );
 
     // KL8 专用：模式行 + 值行
@@ -1064,16 +1003,17 @@ export default function AnalyzeScreen() {
       return (
         <>
           {/* 模式行 */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-            <Text style={{ fontSize: 9, color: '#888', width: 24 }}>模 式</Text>
-            {modes.map((m) => (
-              <Pressable key={m.id}
-                onPress={() => { setKl8CommonMode(m.id); setKl8CommonValue(m.id === 'digit' ? 1 : 0); setKl8CommonMatchCount(2); }}
-                style={btnStyle(kl8CommonMode === m.id)}>
-                <Text style={txtColor(kl8CommonMode === m.id)}>{m.label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <Field caption="模式">
+            <Segmented
+              options={modes.map((m) => ({ value: m.id, label: m.label }))}
+              value={kl8CommonMode}
+              onChange={(m) => {
+                setKl8CommonMode(m);
+                setKl8CommonValue(m === 'digit' ? 1 : 0);
+                setKl8CommonMatchCount(2);
+              }}
+            />
+          </Field>
 
           {/* 号码网格（digit 模式 2×40）*/}
           {isDigit && (
@@ -1085,10 +1025,10 @@ export default function AnalyzeScreen() {
                 rows.push(row);
               }
               return (
-                <View style={{ marginBottom: 3 }}>
+                <Field caption="数字">
                   {rows.map((row, ri) => (
-                    <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-                      <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
+                    <View key={ri} style={styles.kl8Row}>
+                      <Text style={styles.kl8RowLabel}>
                         {String(row[0]).padStart(2, '0')}-
                       </Text>
                       {row.map((v) => {
@@ -1096,8 +1036,8 @@ export default function AnalyzeScreen() {
                         return (
                           <Pressable key={v}
                             onPress={() => { setExternalCodes(null); setKl8CommonValue(v); }}
-                            style={{ flex: 1, height: 22, borderRadius: 3, backgroundColor: active ? '#2563eb' : '#f3f4f6', justifyContent: 'center', alignItems: 'center' }}>
-                            <Text style={{ fontSize: 9, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
+                            style={[styles.kl8Cell, active && styles.kl8CellOn]}>
+                            <Text style={[styles.kl8CellText, active && styles.kl8CellTextOn]}>
                               {String(v).padStart(2, '0')}
                             </Text>
                           </Pressable>
@@ -1105,7 +1045,7 @@ export default function AnalyzeScreen() {
                       })}
                     </View>
                   ))}
-                </View>
+                </Field>
               );
             })()
           )}
@@ -1113,26 +1053,21 @@ export default function AnalyzeScreen() {
           {/* 值行（非 digit 模式）*/}
           {!isDigit && (
             <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-                <Text style={{ fontSize: 9, color: '#888', width: 24 }}>值</Text>
-                {Array.from({ length: valueCount }, (_, i) => i + valueStart).map((v) => (
-                  <Pressable key={v}
-                    onPress={() => setKl8CommonValue(v)}
-                    style={btnStyle(kl8CommonValue === v)}>
-                    <Text style={txtColor(kl8CommonValue === v)}>{valueLabel(v)}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-                <Text style={{ fontSize: 9, color: '#888', width: 24 }}>中N个</Text>
-                {[0, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-                  <Pressable key={n}
-                    onPress={() => setKl8CommonMatchCount(n)}
-                    style={btnStyle(kl8CommonMatchCount === n)}>
-                    <Text style={txtColor(kl8CommonMatchCount === n)}>{n}</Text>
-                  </Pressable>
-                ))}
-              </View>
+              <Field caption="值">
+                <View style={styles.chipRow}>
+                  {Array.from({ length: valueCount }, (_, i) => i + valueStart).map((v) => (
+                    <Chip key={v} label={valueLabel(v)} active={kl8CommonValue === v} onPress={() => setKl8CommonValue(v)} />
+                  ))}
+                </View>
+              </Field>
+              <Field caption="中N个">
+                <DigitGrid
+                  digits={[0, 2, 3, 4, 5, 6, 7, 8, 9]}
+                  selected={[kl8CommonMatchCount]}
+                  onToggle={setKl8CommonMatchCount}
+                  columns={6}
+                />
+              </Field>
             </>
           )}
         </>
@@ -1142,50 +1077,26 @@ export default function AnalyzeScreen() {
     return (
       <>
         {/* 模式选择 */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 24 }}>模式</Text>
-          {[
-            { id: 'digit', label: '数字' },
-            { id: 'front2', label: '前二' },
-            { id: 'back2', label: '后二' },
-          ].map((o) => (
-            <Pressable
-              key={o.id}
-              onPress={() => setCommonMode(o.id as 'digit' | 'front2' | 'back2')}
-              style={{
-                paddingHorizontal: 6, height: 22, borderRadius: 4,
-                backgroundColor: commonMode === o.id ? '#2563eb' : '#f3f4f6',
-                justifyContent: 'center', alignItems: 'center',
-              }}
-            >
-              <Text style={{
-                fontSize: 11,
-                color: commonMode === o.id ? '#ffffff' : '#111827',
-                fontWeight: commonMode === o.id ? '700' : '400',
-              }}>
-                {o.label}
-              </Text>
-            </Pressable>
-          ))}
-          <View style={{ flex: 1 }} />
-          <Text style={{ fontSize: 9, color: '#888' }}>周期</Text>
-          <Pressable
-            onPress={() => setPeriodMenuOpen(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, height: 22, borderRadius: 4, backgroundColor: '#f3f4f6' }}
-          >
-            <Text style={{ fontSize: 11, color: '#111827', fontWeight: '700' }}>{period}</Text>
-            <Text style={{ fontSize: 9, color: '#111827' }}>▼</Text>
-          </Pressable>
-        </View>
-
-        {/* 数值行 + 期数/应用/刷新 */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            {commonMode === 'digit' && digitRow('数字', 9, commonDigit, setCommonDigit)}
-            {commonMode === 'front2' && digitRow('前二和', 18, commonFront2, setCommonFront2)}
-            {commonMode === 'back2' && digitRow('后二和', 18, commonBack2, setCommonBack2)}
+        <Field caption="模式">
+          <Segmented
+            options={[
+              { value: 'digit', label: '数字' },
+              { value: 'front2', label: '前二' },
+              { value: 'back2', label: '后二' },
+            ]}
+            value={commonMode}
+            onChange={(v) => setCommonMode(v)}
+          />
+          <View style={styles.rowBetween}>
+            <Text style={styles.fieldNote}>周期</Text>
+            <Chip label={`${period}`} active onPress={() => setPeriodMenuOpen(true)} />
           </View>
-        </View>
+        </Field>
+
+        {/* 数值行 */}
+        {commonMode === 'digit' && digitRow('数字', 9, commonDigit, setCommonDigit)}
+        {commonMode === 'front2' && digitRow('前二和', 18, commonFront2, setCommonFront2)}
+        {commonMode === 'back2' && digitRow('后二和', 18, commonBack2, setCommonBack2)}
       </>
     );
   };
@@ -1227,25 +1138,19 @@ export default function AnalyzeScreen() {
     <>
       {renderDigitRow('胆码', dan, setDan, (
         <>
-          <Pressable onPress={doDanCompare} style={btnStyle(false)}>
-            <Text style={txtColor(false)}>毒胆同屏</Text>
-          </Pressable>
-          <Pressable onPress={doDanPairCompare} style={btnStyle(false)}>
-            <Text style={txtColor(false)}>毒胆对码同屏</Text>
-          </Pressable>
+          <Chip label="毒胆同屏" active={false} onPress={doDanCompare} />
+          <Chip label="毒胆对码同屏" active={false} onPress={doDanPairCompare} />
         </>
       ))}
       {renderDigitRow('配码', pei, setPei, (
         <>
-          <Pressable onPress={doDanPairCompare} style={btnStyle(false)}>
-            <Text style={txtColor(false)}>胆配对码同屏</Text>
-          </Pressable>
-          <Pressable onPress={doTwoMaCompare} style={btnStyle(false)}>
-            <Text style={txtColor(false)}>二码同屏</Text>
-          </Pressable>
-          <Pressable onPress={() => { setCompareTargets(null); setTopCollapsed(false); setFocusedIdx(null); }} style={btnStyle(false)}>
-            <Text style={txtColor(false)}>退出同屏</Text>
-          </Pressable>
+          <Chip label="胆配对码同屏" active={false} onPress={doDanPairCompare} />
+          <Chip label="二码同屏" active={false} onPress={doTwoMaCompare} />
+          <Chip
+            label="退出同屏"
+            active={false}
+            onPress={() => { setCompareTargets(null); setTopCollapsed(false); setFocusedIdx(null); }}
+          />
         </>
       ))}
     </>
@@ -1260,51 +1165,38 @@ export default function AnalyzeScreen() {
 
   const renderPos = () => (
     <>
-      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-        <Text style={{ fontSize: 9, color: '#888', width: 24 }}>位置</Text>
-        {posOptions.map((p) => (
-          <Pressable key={p} onPress={() => setPos(p)} style={btnStyle(pos === p)}>
-            <Text style={txtColor(pos === p)}>{POS_LABEL_MAP[p]}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-        <Text style={{ fontSize: 9, color: '#888', width: 24 }}>数字</Text>
-        {DIGITS.map((d) => (
-          <Pressable
-            key={`p-${d}`}
-            onPress={() => { setExternalCodes(null); setPosDigit(d); }}
-            style={{
-              width: 22, height: 22, borderRadius: 4,
-              backgroundColor: posDigit === d ? '#2563eb' : '#f3f4f6',
-              justifyContent: 'center', alignItems: 'center',
-            }}
-          >
-            <Text style={{
-              fontSize: 11,
-              color: posDigit === d ? '#ffffff' : '#111827',
-              fontWeight: posDigit === d ? '700' : '400',
-            }}>
-              {d}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Field caption="位置">
+        <Segmented
+          options={posOptions.map((p) => ({ value: p, label: POS_LABEL_MAP[p] }))}
+          value={pos}
+          onChange={setPos}
+        />
+      </Field>
+      <Field caption="数字">
+        <DigitGrid
+          digits={DIGITS}
+          selected={[posDigit]}
+          onToggle={(d) => { setExternalCodes(null); setPosDigit(d); }}
+          marks={digitMarks}
+          columns={6}
+        />
+      </Field>
     </>
   );
 
   const renderMulti = () => (
     <>
       {/* 模式切换 */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-        <Text style={{ fontSize: 9, color: '#888', width: 24 }}>模式</Text>
-        <Pressable onPress={() => setMultiMode('pos')} style={btnStyle(multiMode === 'pos')}>
-          <Text style={txtColor(multiMode === 'pos')}>定位</Text>
-        </Pressable>
-        <Pressable onPress={() => setMultiMode('nopos')} style={btnStyle(multiMode === 'nopos')}>
-          <Text style={txtColor(multiMode === 'nopos')}>不定位</Text>
-        </Pressable>
-      </View>
+      <Field caption="模式">
+        <Segmented
+          options={[
+            { value: 'pos', label: '定位' },
+            { value: 'nopos', label: '不定位' },
+          ]}
+          value={multiMode}
+          onChange={(v) => setMultiMode(v)}
+        />
+      </Field>
 
       {multiMode === 'pos' ? (
         <>
@@ -1322,38 +1214,25 @@ export default function AnalyzeScreen() {
     const meta = keys.find((k) => k.id === hejiKey) ?? keys[0];
     return (
       <>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 24 }}>属性</Text>
-          {keys.map((k) => (
-            <Pressable key={k.id}
-              onPress={() => { setHejiKey(k.id); setHejiValue(Math.floor((k.min + k.max) / 2)); }}
-              style={btnStyle(hejiKey === k.id)}>
-              <Text style={txtColor(hejiKey === k.id)}>{k.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 24 }}>值</Text>
-          {Array.from({ length: meta.max - meta.min + 1 }, (_, i) => meta.min + i).map((v) => (
-            <Pressable
-              key={`h-${v}`}
-              onPress={() => { setExternalCodes(null); setHejiValue(v); }}
-              style={{
-                width: 22, height: 22, borderRadius: 4,
-                backgroundColor: hejiValue === v ? '#2563eb' : '#f3f4f6',
-                justifyContent: 'center', alignItems: 'center',
-              }}
-            >
-              <Text style={{
-                fontSize: 11,
-                color: hejiValue === v ? '#ffffff' : '#111827',
-                fontWeight: hejiValue === v ? '700' : '400',
-              }}>
-                {v}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <Field caption="属性">
+          <Segmented
+            options={keys.map((k) => ({ value: k.id, label: k.label }))}
+            value={hejiKey}
+            onChange={(v) => {
+              const k = keys.find((x) => x.id === v) ?? keys[0];
+              setHejiKey(k.id);
+              setHejiValue(Math.floor((k.min + k.max) / 2));
+            }}
+          />
+        </Field>
+        <Field caption="值">
+          <DigitGrid
+            digits={Array.from({ length: meta.max - meta.min + 1 }, (_, i) => meta.min + i)}
+            selected={[hejiValue]}
+            onToggle={(v) => { setExternalCodes(null); setHejiValue(v); }}
+            columns={6}
+          />
+        </Field>
       </>
     );
   };
@@ -1362,27 +1241,22 @@ export default function AnalyzeScreen() {
   const renderAmp = () => {
     return (
       <>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 24 }}>属性</Text>
-          {AMP_KEYS.map((k) => (
-            <Pressable key={k.id}
-              onPress={() => setAmpKey(k.id)}
-              style={btnStyle(ampKey === k.id)}>
-              <Text style={txtColor(ampKey === k.id)}>{k.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 24 }}>值范围</Text>
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((v) => (
-            <Pressable key={v}
-              onPress={() => setAmpMax(v)}
-              style={btnStyle(ampMax === v)}>
-              <Text style={txtColor(ampMax === v)}>{v}</Text>
-            </Pressable>
-          ))}
-          <Text style={{ fontSize: 9, color: '#888', marginLeft: 6 }}>≤ {ampMax}</Text>
-        </View>
+        <Field caption="属性">
+          <Segmented
+            options={AMP_KEYS.map((k) => ({ value: k.id, label: k.label }))}
+            value={ampKey}
+            onChange={(v) => setAmpKey(v)}
+          />
+        </Field>
+        <Field caption="值范围">
+          <DigitGrid
+            digits={DIGITS}
+            selected={[ampMax]}
+            onToggle={setAmpMax}
+            columns={6}
+          />
+          <Text style={styles.hint}>≤ {ampMax}</Text>
+        </Field>
       </>
     );
   };
@@ -1400,28 +1274,25 @@ export default function AnalyzeScreen() {
     };
     return (
       <>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>玩 法</Text>
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-            <Pressable key={n}
-              onPress={() => setKl8FushiPlaySize(n)}
-              style={btnStyle(kl8FushiPlaySize === n)}>
-              <Text style={txtColor(kl8FushiPlaySize === n)}>选{n}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ marginBottom: 3 }}>
+        <Field caption="玩法">
+          <Segmented
+            options={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ value: String(n), label: `选${n}` }))}
+            value={String(kl8FushiPlaySize)}
+            onChange={(v) => setKl8FushiPlaySize(Number(v))}
+          />
+        </Field>
+        <Field caption="号码">
           {rows.map((row, ri) => (
-            <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-              <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
+            <View key={ri} style={styles.kl8Row}>
+              <Text style={styles.kl8RowLabel}>
                 {String(row[0]).padStart(2, '0')}-
               </Text>
               {row.map((v) => {
                 const active = kl8FushiCodes.includes(v);
                 return (
                   <Pressable key={v} onPress={() => toggleFushi(v)}
-                    style={{ flex: 1, height: 22, borderRadius: 3, backgroundColor: active ? '#2563eb' : '#f3f4f6', justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 9, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
+                    style={[styles.kl8Cell, active && styles.kl8CellOn]}>
+                    <Text style={[styles.kl8CellText, active && styles.kl8CellTextOn]}>
                       {String(v).padStart(2, '0')}
                     </Text>
                   </Pressable>
@@ -1429,442 +1300,736 @@ export default function AnalyzeScreen() {
               })}
             </View>
           ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 10, color: '#888' }}>
-            已选 {kl8FushiCodes.length} 个 · 命中 ≥{kl8FushiPlaySize} 个算中
-          </Text>
-          <View style={{ flex: 1 }} />
-          <Pressable onPress={() => setKl8FushiCodes([])}
-            style={{ paddingHorizontal: 10, height: 22, borderRadius: 4, backgroundColor: '#f3f4f6' }}>
-            <Text style={{ fontSize: 11, color: '#111827' }}>清空</Text>
-          </Pressable>
-        </View>
+        </Field>
+        <Field caption="结果">
+          <View style={styles.rowBetween}>
+            <Text style={styles.hint}>
+              已选 {kl8FushiCodes.length} 个 · 命中 ≥{kl8FushiPlaySize} 个算中
+            </Text>
+            <Chip label="清空" active={false} onPress={() => setKl8FushiCodes([])} />
+          </View>
+        </Field>
       </>
     );
   };
 
   const renderPlaceholder = (label: string) => (
-    <View style={{ paddingVertical: 4, alignItems: 'center' }}>
-      <Text style={{ fontSize: 11, color: '#888' }}>{label} · 开发中</Text>
+    <View style={styles.placeholder}>
+      <Text style={styles.hint}>{label} · 开发中</Text>
     </View>
   );
 
-  const renderBottomBar = () => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-      {[{ id: 'fc3d', label: '福彩3D' }, { id: 'pl3', label: '排列3' }].map((g) => (
-        <Pressable key={g.id} onPress={() => setGameId(g.id)} style={btnStyle(gameId === g.id)}>
-          <Text style={txtColor(gameId === g.id)}>{g.label}</Text>
-        </Pressable>
-      ))}
-      <Text style={{ fontSize: 9, color: '#888' }}>周期</Text>
-      {[1, 2, 3, 5, 10].map((p) => (
-        <Pressable key={`pd-${p}`} onPress={() => setPeriod(p)} style={btnStyle(period === p)}>
-          <Text style={txtColor(period === p)}>{p}</Text>
-        </Pressable>
-      ))}
-      <TextInput
-        value={countInput}
-        onChangeText={setCountInput}
-        onEndEditing={applyCount}
-        onSubmitEditing={applyCount}
-        keyboardType="numeric"
-        style={{
-          width: 60, height: 24, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 4,
-          paddingHorizontal: 4, paddingVertical: 0, fontSize: 12, lineHeight: 16,
-          color: '#111827', textAlign: 'center', backgroundColor: '#ffffff',
-        }}
-        placeholderTextColor="#9ca3af"        placeholder="500"
-      />
-      <Pressable onPress={applyCount} style={btnStyle(true)}>
-        <Text style={txtColor(true)}>应用</Text>
-      </Pressable>
-      <Pressable onPress={() => void refresh()} disabled={refreshing} style={btnStyle(false)}>
-        <Text style={txtColor(false)}>{refreshing ? '刷新中…' : '刷新'}</Text>
-      </Pressable>
-      <Text style={{ fontSize: 9, color: '#888' }} numberOfLines={1}>
-        {game.name} · 集合 {codesCount} 注 · 理论 {theoryMiss.toFixed(2)} · {source} {records.length}期
-      </Text>
-    </View>
+  /** 原型 .bottombar：左侧重置 + 右侧主按钮 */
+  const handleReset = () => {
+    setShapeMainMode('zhixuan');
+    setShapeFilters([]);
+    setCompareTargets(null);
+    setFocusedIdx(null);
+    setExternalCodes(null);
+  };
+
+  const handleExport = () => {
+    Alert.alert(
+      '出图',
+      `${game.name} · ${getTargetLabel(target)}\n集合 ${codesCount} 注 · 理论遗漏 ${theoryMiss.toFixed(2)}\n当前遗漏 ${currentOmission}`,
+    );
+  };
+
+  /** 数据 / 期数面板（原底部工具栏） */
+  const renderDataBar = () => (
+    <>
+      <Field caption="彩种 / 周期">
+        <View style={styles.chipRow}>
+          {[{ id: 'fc3d', label: '福彩3D' }, { id: 'pl3', label: '排列3' }].map((g) => (
+            <Chip
+              key={g.id}
+              label={g.label}
+              active={gameId === g.id}
+              onPress={() => setGameId(g.id)}
+            />
+          ))}
+        </View>
+        <View style={styles.chipRow}>
+          {[1, 2, 3, 5, 10].map((p) => (
+            <Chip key={`pd-${p}`} label={String(p)} active={period === p} onPress={() => setPeriod(p)} />
+          ))}
+        </View>
+      </Field>
+      <Field caption="期数 / 分析窗口">
+        <View style={styles.rowBetween}>
+          <TextInput
+            value={countInput}
+            onChangeText={setCountInput}
+            onEndEditing={applyCount}
+            onSubmitEditing={applyCount}
+            keyboardType="numeric"
+            style={styles.numInput}
+            placeholderTextColor={semantic.textFaint}
+            placeholder="500"
+          />
+          <Chip label="应用" active onPress={applyCount} />
+          <Chip label={refreshing ? '刷新中…' : '刷新'} active={false} onPress={() => void refresh()} />
+        </View>
+        <Text style={styles.hint} numberOfLines={2}>
+          {game.name} · 集合 {codesCount} 注 · 理论 {theoryMiss.toFixed(2)} · {source} {records.length}期 / 共{allRecords.length}期
+        </Text>
+      </Field>
+    </>
   );
 
+  /** 图表渲染：只统一容器，组件 props 与原来一致 */
+  const renderChart = (
+    m: ChartMode,
+    w: number,
+    h: number,
+    s: TargetPoint[],
+    oS: { issue: string; omission: number }[],
+    tMiss: number,
+    label: string,
+    historyMax?: number,
+  ) => {
+    if (m === 'freq') {
+      return (
+        <EChartsFreqKChart
+          series={s}
+          height={h}
+          width={w}
+          period={period}
+          barWidth={1.5}
+          hideShadow={true}
+          heightScale={1}
+          targetLabel={label}
+        />
+      );
+    }
+    if (m === 'omissionK') {
+      return (
+        <EChartsOmissionKChart
+          series={s}
+          height={h}
+          width={w}
+          theoryMiss={tMiss}
+          targetLabel={label}
+        />
+      );
+    }
+    if (m === 'omissionLine') {
+      return (
+        <EChartsOmissionChart
+          series={oS}
+          height={h}
+          width={w}
+          theoryMiss={tMiss}
+          targetLabel={label}
+          historyMaxMiss={historyMax}
+          mode="level1"
+        />
+      );
+    }
+    if (m === 'omissionLine2') {
+      return (
+        <EChartsOmissionChart
+          series={oS}
+          height={h}
+          width={w}
+          theoryMiss={tMiss}
+          targetLabel={label}
+          historyMaxMiss={historyMax}
+          mode="level2"
+        />
+      );
+    }
+    return null;
+  };
 
-  // 图表可用高度
-  const TOP_BAR_H = topCollapsed ? 30 : 180;
-  const availH = Math.max(140, height - TOP_BAR_H);
+  /** 毒胆同屏：原型 .tong-grid 两列；点按放大单图 */
+  const renderCompare = () => {
+    if (!compareTargets || compareTargets.length === 0) return null;
+    const list = compareTargets
+      .map((ct, idx) => ({ ct, idx }))
+      .filter(({ idx }) => focusedIdx === null || focusedIdx === idx);
 
-  // 对比模式：网格布局（每行 5 个，最多 2 行）
-  const COLS = 5;
-  const cellW = (width - 20 - COLS * 2) / COLS;
-  const rows = compareTargets ? Math.ceil(compareTargets.length / COLS) : 0;
-  const cellH = rows > 0 ? Math.max(60, (availH - 6) / rows) : 200;
+    // 满屏模式：单张大图
+    if (focusedIdx !== null && list.length > 0) {
+      const { ct } = list[0];
+      const sliceN = records.length;
+      const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
+      const tMiss = getTheoryMiss(ct, V, DD);
+      const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
+      const m = chartModes[0]; // 同屏只显示第一种图
+      return (
+        <>
+          <ChartCard title={getTargetLabel(ct)} meta={CHART_META[m].title}>
+            <Pressable onPress={() => setFocusedIdx(null)}>
+              {renderChart(
+                m,
+                chartW,
+                Math.max(chartSize.h * 2, availH - 40),
+                s,
+                oSeries,
+                tMiss,
+                getTargetLabel(ct),
+              )}
+            </Pressable>
+          </ChartCard>
+          <View style={{ height: space.md }} />
+          <View style={styles.chipRow}>
+            <Chip
+              label="退出同屏"
+              active={false}
+              onPress={() => { setCompareTargets(null); setTopCollapsed(false); setFocusedIdx(null); }}
+            />
+          </View>
+        </>
+      );
+    }
+
+    return (
+      <TongGrid>
+        {list.map(({ ct, idx }) => {
+          const sliceN = Math.min(records.length, 300);
+          const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
+          const tMiss = getTheoryMiss(ct, V, DD);
+          const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
+          // 胆码标签
+          const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
+          const m = chartModes[0]; // 同屏只显示第一种图
+          return (
+            <TongCell key={idx} digit={label}>
+              <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
+                {renderChart(m, tongW, chartSize.tongCell, s, oSeries, tMiss, getTargetLabel(ct))}
+              </Pressable>
+            </TongCell>
+          );
+        })}
+      </TongGrid>
+    );
+  };
 
   return (
-    <Screen safeAreaEdges={['top', 'left', 'right']}>
-      <View style={{ flex: 1, padding: 4 }}>
-        {/* 顶部菜单（收起时只留箭头） */}
-        {topCollapsed ? (
-          <Pressable
-            onPress={() => setTopCollapsed(false)}
-            style={{
-              paddingVertical: 4,
-              alignItems: 'center',
-              backgroundColor: '#f3f4f6',
-              borderRadius: 4,
-              marginBottom: 4,
-            }}
-          >
-            <Text style={{ fontSize: 11, color: '#111827' }}>▼ 展开菜单</Text>
-          </Pressable>
-        ) : (
-          <>
-            {renderTabBar()}
-            {(tab === 'dan' || tab === 'dantuo') && renderTypeRow()}
-            {tab === 'kl8dt' && renderKl8Dt()}
-            {tab === 'kl8seq' && renderKl8Seq()}
-            {tab === 'combo' && renderCombo()}
-            {tab === 'common' && renderCommon()}
-            {tab === 'dan' && renderDan()}
-            {tab === 'dantuo' && renderDantuo()}
-            {tab === 'pos' && renderPos()}
-            {tab === 'multi' && renderMulti()}
-            {tab === 'heji' && renderHeji()}
-        {tab === 'amp' && renderAmp()}
-            {tab === 'fushi' && renderFushi()}
-            {tab === 'random1' && renderPlaceholder('组内随机')}
-            {tab === 'random2' && renderPlaceholder('随机交并')}
-            {tab === 'group' && renderPlaceholder('分组胆')}
-          </>
-        )}
-
-        {/* 彩种选择 Modal */}
-        <Modal visible={gameMenuOpen} transparent animationType="fade" onRequestClose={() => setGameMenuOpen(false)}>
-          <Pressable
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}
-            onPress={() => setGameMenuOpen(false)}
-          >
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 8, minWidth: 160 }}>
-              {[
-                { id: 'fc3d', label: '福彩3D', enabled: true },
-                { id: 'pl3', label: '排列3', enabled: true },
-                { id: 'pl5', label: '排列5', enabled: true },
-                { id: 'kl8', label: '快乐8', enabled: true },
-              ].map((g) => (
-                <Pressable
-                  key={g.id}
-                  onPress={() => {
-                    if (!g.enabled) return;
-                    setGameId(g.id);
-                    setGameMenuOpen(false);
-                  }}
-                  style={{ paddingVertical: 10, paddingHorizontal: 16, opacity: g.enabled ? 1 : 0.4 }}
-                >
-                  <Text style={{ fontSize: 13, color: gameId === g.id ? '#2563eb' : '#111827', fontWeight: gameId === g.id ? '700' : '400' }}>
-                    {g.label}{!g.enabled ? '  (开发中)' : ''}
-                  </Text>
-                </Pressable>
-              ))}
-              <View style={{ height: 1, backgroundColor: '#e5e7eb', marginVertical: 6 }} />
-              <Pressable
-                onPress={() => { setGameMenuOpen(false); void runFullFetch(); }}
-                style={{ paddingVertical: 10, paddingHorizontal: 16 }}
-              >
-                <Text style={{ fontSize: 13, color: '#059669', fontWeight: '700' }}>全量数据</Text>
-                <Text style={{ fontSize: 10, color: '#6b7280' }}>重新拉取并多源校验</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { setGameMenuOpen(false); void runVerify(); }}
-                style={{ paddingVertical: 10, paddingHorizontal: 16 }}
-              >
-                <Text style={{ fontSize: 13, color: '#7c3aed', fontWeight: '700' }}>校验数据</Text>
-                <Text style={{ fontSize: 10, color: '#6b7280' }}>对比本地与远程，标记冲突</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Modal>
-
-        {/* 数据任务进度 Modal */}
-        <Modal visible={dataTaskRunning} transparent animationType="fade" onRequestClose={() => {}}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 24, alignItems: 'center', minWidth: 220 }}>
-              <ActivityIndicator size="large" color="#2563eb" />
-              <Text style={{ fontSize: 13, color: '#111827', marginTop: 12, fontWeight: '700' }}>处理中…</Text>
-              <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 6, textAlign: 'center' }}>{dataTaskMsg}</Text>
-            </View>
+    <Screen
+      safeAreaEdges={['top', 'left', 'right']}
+      backgroundColor={semantic.pageBg}
+      statusBarStyle="light"
+    >
+      <View style={styles.shell}>
+        {/* ───── brand 品牌栏 ───── */}
+        <View style={styles.brand}>
+          <View style={styles.logo}>
+            <Text style={styles.logoText}>奇</Text>
           </View>
-        </Modal>
-
-        {/* 周期选择 Modal */}
-        <Modal visible={periodMenuOpen} transparent animationType="fade" onRequestClose={() => setPeriodMenuOpen(false)}>
-          <Pressable
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}
-            onPress={() => setPeriodMenuOpen(false)}
-          >
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 6, maxWidth: 260 }}>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((p) => (
-                <Pressable
-                  key={p}
-                  onPress={() => {
-                    setPeriod(p);
-                    setPeriodMenuOpen(false);
-                  }}
-                  style={{
-                    width: 40, height: 32, borderRadius: 4,
-                    backgroundColor: period === p ? '#2563eb' : '#f3f4f6',
-                    justifyContent: 'center', alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ fontSize: 12, color: period === p ? '#fff' : '#111827', fontWeight: period === p ? '700' : '400' }}>
-                    {p}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </Pressable>
-        </Modal>
-
-        {/* 图表区 + 左侧栏 */}
-        <View style={{ flex: 1, flexDirection: 'row' }}>
-          {tab !== 'amp' && (
-            <ScrollView
-              style={{ width: 26, flexGrow: 0 }}
-              contentContainerStyle={{ gap: 2, paddingRight: 2 }}
-              showsVerticalScrollIndicator={false}
-            >
-              {[
-                { id: 'freq' as ChartMode, label: '频率K' },
-                { id: 'omissionK' as ChartMode, label: '遗漏K' },
-                { id: 'omissionLine' as ChartMode, label: '遗漏图' },
-                { id: 'omissionLine2' as ChartMode, label: '二阶遗漏图' },
-              ].map((c) => {
-                const active = chartModes.includes(c.id);
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => toggleChart(c.id)}
-                    style={{
-                      minHeight: 72,
-                      borderRadius: 4,
-                      backgroundColor: active ? '#2563eb' : '#f3f4f6',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      paddingVertical: 4,
-                      paddingHorizontal: 2,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 9,
-                        lineHeight: 12,
-                        textAlign: 'center',
-                        color: active ? '#ffffff' : '#111827',
-                        fontWeight: active ? '700' : '400',
-                      }}
-                    >
-                      {c.label.split('').join('\n')}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          )}
-          <View style={{ flex: 1, position: 'relative' }}>
-          {/* 振幅/分类 专用图 */}
-          {tab === 'amp' && (
-            <View style={{ backgroundColor: '#fff', borderRadius: 4, borderWidth: 1, borderColor: '#e5e7eb', padding: 2, marginBottom: 4, flex: 1 }}>
-              {rawData && (
-              <SkiaRawChart
-                data={rawData}
-                height={Math.max(200, height - TOP_BAR_H - 8)}
-                width={typeof width === 'number' ? width - 24 : 334}
-                title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
-                highlightValue={ampMax}
-              />
-              )}
-            </View>
-          )}
-          {/* 右上角悬浮切换按钮 */}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.brandTitle}>臻奇妙趋势分析</Text>
+            <Text style={styles.brandSub}>TREND · 手机原型</Text>
+          </View>
           <Pressable
             onPress={() => setTopCollapsed((v) => !v)}
-            style={{
-              position: 'absolute',
-              top: 2,
-              left: 2,
-              zIndex: 100,
-              width: 26,
-              height: 26,
-              borderRadius: 13,
-              backgroundColor: 'rgba(243,244,246,0.95)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderWidth: 1,
-              borderColor: '#d1d5db',
-            }}
+            style={styles.iconBtn}
+            accessibilityState={{ expanded: !topCollapsed }}
           >
-            <Text style={{ fontSize: 14, color: '#374151', fontWeight: '700' }}>
-              {topCollapsed ? '▼' : '▲'}
-            </Text>
+            <Text style={styles.iconBtnText}>{topCollapsed ? '▼' : '▲'}</Text>
           </Pressable>
+        </View>
+
+        {/* ───── gamebar 彩种 ───── */}
+        <View style={styles.gamebar}>
+          <View style={styles.gameList}>
+            {GAMES.map((g) => {
+              const on = gameId === g.id;
+              return (
+                <Pressable
+                  key={g.id}
+                  onPress={() => setGameId(g.id)}
+                  style={[styles.game, on && styles.gameOn]}
+                  accessibilityState={{ selected: on }}
+                >
+                  <View style={[styles.gameDot, on && styles.gameDotOn]} />
+                  <Text style={[styles.gameText, on && styles.gameTextOn]}>{g.label}</Text>
+                </Pressable>
+              );
+            })}
+            <Pressable onPress={() => setGameMenuOpen(true)} style={styles.gameMore}>
+              <Text style={styles.gameMoreText}>⋯</Text>
+            </Pressable>
+          </View>
+          <StatPill>
+            <Text style={styles.statusText}>
+              数据 <Text style={styles.statusBold}>{allRecords.length}</Text> 期 · 当前遗漏{' '}
+              <Text style={styles.statusBold}>{currentOmission}</Text>
+            </Text>
+          </StatPill>
+        </View>
+
+        {/* ───── prinav 主导航 ───── */}
+        <View style={styles.prinav}>
+          <Segmented
+            options={PRINAV_OPTIONS}
+            value={PRINAV_VALUE}
+            onChange={(v) => {
+              if (v === 'group') Alert.alert('组号', '组号功能开发中，敬请期待');
+            }}
+            equalWidth
+          />
+        </View>
+
+        {/* ───── subtabs 子页签（吸顶可横滚） ───── */}
+        <View style={styles.subtabs}>
+          <SubTabs items={visibleTabs} value={tab} onChange={onTabChange} />
+        </View>
+
+        {/* ───── content 内容区 ───── */}
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentInner}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 选号面板（收起时只留展开条） */}
+          {topCollapsed ? (
+            <Pressable onPress={() => setTopCollapsed(false)} style={styles.expandBar}>
+              <Text style={styles.expandText}>▼ 展开选号</Text>
+            </Pressable>
+          ) : (
+            <Panel label="选 号" right={<Text style={styles.panelRight}>{game.name}</Text>}>
+              {tab === 'common' && renderCommon()}
+              {(tab === 'dan' || tab === 'dantuo') && renderTypeRow()}
+              {tab === 'dan' && renderDan()}
+              {tab === 'dantuo' && renderDantuo()}
+              {tab === 'pos' && renderPos()}
+              {tab === 'multi' && renderMulti()}
+              {tab === 'heji' && renderHeji()}
+              {tab === 'amp' && renderAmp()}
+              {tab === 'combo' && renderCombo()}
+              {tab === 'fushi' && renderFushi()}
+              {tab === 'kl8seq' && renderKl8Seq()}
+              {tab === 'kl8dt' && renderKl8Dt()}
+              {tab === 'random1' && renderPlaceholder('组内随机')}
+              {tab === 'random2' && renderPlaceholder('随机交并')}
+              {tab === 'group' && renderPlaceholder('分组胆')}
+              {/* 形态（仅 3D / 排列3） */}
+              {(gameId === 'fc3d' || gameId === 'pl3') && (
+                <Field caption="形态（主模式 / 过滤）">
+                  <View style={styles.chipRow}>
+                    <Chip
+                      label="组选"
+                      active={shapeMainMode === 'zuxuan'}
+                      onPress={() => setShapeMainMode(shapeMainMode === 'zuxuan' ? 'zhixuan' : 'zuxuan')}
+                    />
+                    <Chip
+                      label="组三"
+                      active={shapeFilters.includes('zusan')}
+                      onPress={() => setShapeFilters((prev) => prev.includes('zusan') ? prev.filter((x) => x !== 'zusan') : [...prev, 'zusan'])}
+                    />
+                    <Chip
+                      label="组六"
+                      active={shapeFilters.includes('zuliu')}
+                      onPress={() => setShapeFilters((prev) => prev.includes('zuliu') ? prev.filter((x) => x !== 'zuliu') : [...prev, 'zuliu'])}
+                    />
+                  </View>
+                </Field>
+              )}
+            </Panel>
+          )}
+
+          {/* 数据 / 期数面板 */}
+          <Panel label="数 据">{renderDataBar()}</Panel>
+
+          {/* 图表类型 + 图例 */}
+          {tab !== 'amp' && (
+            <Panel label="图 表">
+              <View style={styles.chipRow}>
+                {CHART_MODES.map((c) => (
+                  <Chip
+                    key={c.id}
+                    label={c.label}
+                    active={chartModes.includes(c.id)}
+                    onPress={() => toggleChart(c.id)}
+                  />
+                ))}
+              </View>
+              <Legend
+                items={[
+                  { color: palette.accent, label: '频率 / 实出' },
+                  { color: palette.amber, label: '均线 / 胆码' },
+                  { color: palette.cyan, label: '遗漏' },
+                ]}
+              />
+            </Panel>
+          )}
+
+          {/* 振幅专用图 */}
+          {tab === 'amp' && (
+            <ChartCard
+              title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+              meta={`≤ ${ampMax}`}
+            >
+              {rawData && (
+                <SkiaRawChart
+                  data={rawData}
+                  height={Math.max(chartSize.h, availH - 8)}
+                  width={chartW}
+                  title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                  highlightValue={ampMax}
+                />
+              )}
+            </ChartCard>
+          )}
+
           {loading ? (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <ActivityIndicator />
-              <Text style={{ fontSize: 11, color: '#888', marginTop: 6 }}>加载中…</Text>
+            <View style={styles.centerBox}>
+              <ActivityIndicator color={palette.accent} />
+              <Text style={styles.hint}>加载中…</Text>
             </View>
           ) : error ? (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <Text style={{ fontSize: 11, color: 'red' }}>加载失败：{error}</Text>
+            <View style={styles.centerBox}>
+              <Text style={styles.errorText}>加载失败：{error}</Text>
             </View>
           ) : compareTargets && compareTargets.length > 0 ? (
-            // 对比模式：网格布局 / 满屏模式
-            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
-              {compareTargets
-                .map((ct, idx) => ({ ct, idx }))
-                .filter(({ idx }) => focusedIdx === null || focusedIdx === idx)
-                .map(({ ct, idx }) => {
-                const sliceN = focusedIdx !== null ? records.length : Math.min(records.length, 300);
-                const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
-                const tMiss = getTheoryMiss(ct, V, DD);
-                const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
-                // 胆码标签
-                const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
-                const m = chartModes[0]; // 同屏只显示第一种图
-                const cellWFinal = focusedIdx !== null ? width - 24 : cellW;
-                const cellHFinal = focusedIdx !== null ? availH - 8 : cellH;
-                return (
-                  <Pressable
-                    key={idx}
-                    onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}
-                    style={{
-                      width: cellWFinal,
-                      height: cellHFinal,
-                      borderWidth: 1,
-                      borderColor: '#e5e7eb',
-                      borderRadius: 2,
-                      margin: 0.5,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {/* 胆码标签 */}
-                    <View style={{
-                      position: 'absolute',
-                      top: 2,
-                      left: 4,
-                      zIndex: 20,
-                    }}>
-                      <Text style={{ fontSize: 12, color: '#f59e0b', fontWeight: '700' }}>
-                        {label}
-                      </Text>
-                    </View>
-                    {m === 'freq' && (
-                      <EChartsFreqKChart
-                        series={s}
-                        height={cellHFinal}
-                        width={cellWFinal}
-                        period={period}
-                        barWidth={1.5}
-                        hideShadow={true}
-                        heightScale={1}
-                        targetLabel={getTargetLabel(ct)}
-                      />
-                    )}
-                    {m === 'omissionK' && (
-                      <EChartsOmissionKChart
-                        series={s}
-                        height={cellHFinal}
-                        width={cellWFinal}
-                        theoryMiss={tMiss}
-                        targetLabel={getTargetLabel(ct)}
-                      />
-                    )}
-                    {m === 'omissionLine' && (
-                      <EChartsOmissionChart
-                        series={oSeries}
-                        height={cellHFinal}
-                        width={cellWFinal}
-                        theoryMiss={tMiss}
-                        targetLabel={getTargetLabel(ct)}
-                        mode="level1"
-                      />
-                    )}
-                    {m === 'omissionLine2' && (
-                      <EChartsOmissionChart
-                        series={oSeries}
-                        height={cellHFinal}
-                        width={cellWFinal}
-                        theoryMiss={tMiss}
-                        targetLabel={getTargetLabel(ct)}
-                        mode="level2"
-                      />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            renderCompare()
           ) : tab === 'amp' ? null : codesCount === 0 ? (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <Text style={{ fontSize: 11, color: '#888' }}>请在上方选择号码</Text>
+            <View style={styles.centerBox}>
+              <Text style={styles.hint}>请在上方选择号码</Text>
             </View>
           ) : (
-            <ScrollView>
+            <View style={[styles.chartsGrid, isLandscape && styles.chartsGridLandscape]}>
               {chartModes.map((m) => (
-                <View key={m} style={{
-                  backgroundColor: '#fff',
-                  borderRadius: 2,
-                  borderWidth: 1,
-                  borderColor: '#e5e7eb',
-                  padding: 0,
-                  marginBottom: 2,
-                }}>
-                  {m === 'freq' && (
-                      <EChartsFreqKChart
-                        series={series}
-                        height={Math.max(140, height - TOP_BAR_H)}
-                        width={typeof width === 'number' ? width - 24 : 334}
-                        period={period}
-                        barWidth={1.5}
-                        hideShadow={true}
-                        heightScale={1}
-                        targetLabel={getTargetLabel(target)}
-                      />
+                <View key={m} style={[styles.chartCell, isLandscape && { width: chartColW }]}>
+                  <ChartCard title={CHART_META[m].title} meta={CHART_META[m].meta}>
+                    {renderChart(
+                      m,
+                      chartW,
+                      chartH,
+                      series,
+                      omissionSeries,
+                      theoryMiss,
+                      getTargetLabel(target),
+                      historyMaxMiss,
                     )}
-                  {m === 'omissionLine' && (
-                    <EChartsOmissionChart
-                      series={omissionSeries}
-                      height={Math.max(140, height - TOP_BAR_H)}
-                      width={typeof width === 'number' ? width - 24 : 334}
-                      theoryMiss={theoryMiss}
-                      targetLabel={getTargetLabel(target)}
-                      historyMaxMiss={historyMaxMiss}
-                      mode="level1"
-                    />
-                  )}
-                  {m === 'omissionLine2' && (
-                    <EChartsOmissionChart
-                      series={omissionSeries}
-                      height={Math.max(140, height - TOP_BAR_H)}
-                      width={typeof width === 'number' ? width - 24 : 334}
-                      theoryMiss={theoryMiss}
-                      targetLabel={getTargetLabel(target)}
-                      historyMaxMiss={historyMaxMiss}
-                      mode="level2"
-                    />
-                  )}
-                  {m === 'omissionK' && (
-                    <EChartsOmissionKChart
-                        series={series}
-                        height={Math.max(140, height - TOP_BAR_H)}
-                        width={typeof width === 'number' ? width - 24 : 334}
-                        theoryMiss={theoryMiss}
-                        targetLabel={getTargetLabel(target)}
-                      />
-                  )}
+                  </ChartCard>
                 </View>
               ))}
-            </ScrollView>
+            </View>
           )}
-        </View>
+        </ScrollView>
+
+        {/* ───── bottombar 底部操作栏 ───── */}
+        <View style={{ paddingBottom: insets.bottom }}>
+          <BottomBar
+            primaryLabel="出 图"
+            onPrimary={handleExport}
+            ghostLabel="重置"
+            onGhost={handleReset}
+            hint={`${game.name} · 集合 ${codesCount} 注 · 理论 ${theoryMiss.toFixed(2)}`}
+            vertical={isLandscape}
+          />
         </View>
       </View>
+
+      {/* 彩种选择 / 数据任务 Modal */}
+      <Modal visible={gameMenuOpen} transparent animationType="fade" onRequestClose={() => setGameMenuOpen(false)}>
+        <Pressable
+          style={styles.modalMask}
+          onPress={() => setGameMenuOpen(false)}
+        >
+          <View style={[styles.modalCard, { minWidth: 200 }]}>
+            {[
+              { id: 'fc3d', label: '福彩3D', enabled: true },
+              { id: 'pl3', label: '排列3', enabled: true },
+              { id: 'pl5', label: '排列5', enabled: true },
+              { id: 'kl8', label: '快乐8', enabled: true },
+            ].map((g) => (
+              <Pressable
+                key={g.id}
+                onPress={() => {
+                  if (!g.enabled) return;
+                  setGameId(g.id);
+                  setGameMenuOpen(false);
+                }}
+                style={[styles.modalOption, { opacity: g.enabled ? 1 : 0.4 }]}
+              >
+                <Text style={[styles.modalOptionText, gameId === g.id && styles.modalOptionTextOn]}>
+                  {g.label}{!g.enabled ? '  (开发中)' : ''}
+                </Text>
+              </Pressable>
+            ))}
+            <View style={styles.modalDivider} />
+            <Pressable
+              onPress={() => { setGameMenuOpen(false); void runFullFetch(); }}
+              style={styles.modalOption}
+            >
+              <Text style={[styles.modalOptionText, { color: semantic.brand, fontWeight: '700' }]}>全量数据</Text>
+              <Text style={styles.hint}>重新拉取并多源校验</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => { setGameMenuOpen(false); void runVerify(); }}
+              style={styles.modalOption}
+            >
+              <Text style={[styles.modalOptionText, { color: semantic.cold, fontWeight: '700' }]}>校验数据</Text>
+              <Text style={styles.hint}>对比本地与远程，标记冲突</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* 数据任务进度 Modal */}
+      <Modal visible={dataTaskRunning} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.modalMaskSolid}>
+          <View style={styles.modalCardCenter}>
+            <ActivityIndicator size="large" color={palette.accent} />
+            <Text style={styles.modalTitle}>处理中…</Text>
+            <Text style={styles.hint}>{dataTaskMsg}</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 周期选择 Modal */}
+      <Modal visible={periodMenuOpen} transparent animationType="fade" onRequestClose={() => setPeriodMenuOpen(false)}>
+        <Pressable
+          style={styles.modalMask}
+          onPress={() => setPeriodMenuOpen(false)}
+        >
+          <View style={[styles.modalCard, { flexDirection: 'row', flexWrap: 'wrap', maxWidth: 280 }]}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((p) => (
+              <Pressable
+                key={p}
+                onPress={() => {
+                  setPeriod(p);
+                  setPeriodMenuOpen(false);
+                }}
+                style={[styles.modalGridCell, period === p && styles.modalGridCellOn]}
+              >
+                <Text style={[styles.modalOptionText, period === p && styles.modalOptionTextOn]}>
+                  {p}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  shell: { flex: 1, backgroundColor: semantic.pageBg },
+
+  /* brand */
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.sm,
+    backgroundColor: semantic.contentBg,
+  },
+  logo: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.sm,
+    backgroundColor: palette.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoText: { fontWeight: '800', color: semantic.onBrand, fontSize: fs.md },
+  brandTitle: { fontSize: fs.lg, fontWeight: '700', letterSpacing: 0.6, lineHeight: 20 },
+  brandSub: { fontSize: fs.micro, color: semantic.textFaint, letterSpacing: 2.4 },
+  iconBtn: {
+    minWidth: touch.min,
+    minHeight: touch.min,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    backgroundColor: semantic.panelBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconBtnText: { fontSize: fs.base, color: semantic.textDim, fontWeight: '700' },
+
+  /* gamebar */
+  gamebar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.sm,
+    backgroundColor: semantic.contentBg,
+  },
+  gameList: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', flex: 1 },
+  game: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 8,
+    paddingHorizontal: space.md,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    backgroundColor: semantic.panelBg,
+  },
+  gameOn: {
+    backgroundColor: alpha(palette.accent, 0.18),
+    borderColor: semantic.brand,
+  },
+  gameDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: semantic.textFaint },
+  gameDotOn: { backgroundColor: semantic.brand },
+  gameText: { fontSize: fs.sm, color: semantic.textDim },
+  gameTextOn: { color: semantic.brand, fontWeight: '600' },
+  gameMore: {
+    paddingVertical: 8,
+    paddingHorizontal: space.md,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    backgroundColor: semantic.panelBg,
+  },
+  gameMoreText: { fontSize: fs.sm, color: semantic.textDim, fontWeight: '700' },
+  statusText: { fontSize: fs.micro, color: semantic.textFaint },
+  statusBold: { color: semantic.cold, fontWeight: '500' },
+
+  /* prinav / subtabs */
+  prinav: { paddingHorizontal: space.lg, paddingBottom: space.sm },
+  subtabs: {
+    paddingHorizontal: space.lg,
+    paddingBottom: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: semantic.divider,
+    backgroundColor: semantic.contentBg,
+  },
+
+  /* content */
+  content: { flex: 1, backgroundColor: semantic.contentBg },
+  contentInner: { padding: space.lg, gap: space.lg },
+  panelRight: { fontSize: fs.micro, color: semantic.textDim },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  rowBetween: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: space.sm,
+    flexWrap: 'wrap',
+  },
+  fieldNote: { fontSize: fs.xs, color: semantic.textDim, marginBottom: space.xs },
+  hint: { fontSize: fs.xs, color: semantic.textFaint, lineHeight: 18 },
+  hintOn: { color: semantic.brand, fontWeight: '700' },
+  errorText: { fontSize: fs.sm, color: semantic.hot },
+  numInput: {
+    width: 84,
+    paddingVertical: 9,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    backgroundColor: semantic.controlBg,
+    color: semantic.text,
+    fontSize: fs.base,
+    textAlign: 'center',
+  },
+  placeholder: { paddingVertical: space.sm, alignItems: 'center' },
+  expandBar: {
+    minHeight: touch.min,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    backgroundColor: semantic.panelBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandText: { fontSize: fs.sm, color: semantic.textDim },
+
+  /* KL8 1–80 紧凑网格 */
+  kl8Row: { flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 },
+  kl8RowLabel: { fontSize: fs.micro, color: semantic.textFaint, width: 22 },
+  kl8Cell: {
+    flex: 1,
+    height: 22,
+    borderRadius: 3,
+    backgroundColor: semantic.controlBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kl8CellOn: { backgroundColor: semantic.brand },
+  kl8CellOff: { backgroundColor: semantic.panelBorder, opacity: 0.4 },
+  kl8CellText: { fontSize: fs.micro, color: semantic.text },
+  kl8CellTextOn: { color: semantic.onBrand, fontWeight: '700' },
+  kl8CellTextOff: { color: semantic.textFaint },
+
+  /* charts */
+  chartsGrid: { flexDirection: 'column', gap: space.lg },
+  chartsGridLandscape: { flexDirection: 'row', flexWrap: 'wrap' },
+  chartCell: { width: '100%' },
+  centerBox: {
+    minHeight: 160,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+
+  /* modals */
+  modalMask: {
+    flex: 1,
+    backgroundColor: alpha(palette.bg2, 0.72),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalMaskSolid: {
+    flex: 1,
+    backgroundColor: alpha(palette.bg2, 0.88),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCard: {
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.md,
+    padding: space.md,
+  },
+  modalCardCenter: {
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.md,
+    padding: space.xxl,
+    alignItems: 'center',
+    minWidth: 220,
+  },
+  modalTitle: {
+    fontSize: fs.sm,
+    fontWeight: '700',
+    color: semantic.text,
+    marginBottom: space.md,
+    textAlign: 'center',
+  },
+  modalOption: {
+    paddingVertical: 10,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.sm,
+  },
+  modalOptionOn: { backgroundColor: semantic.brand },
+  modalOptionText: { fontSize: fs.sm, color: semantic.text, textAlign: 'center' },
+  modalOptionTextOn: { color: semantic.brand, fontWeight: '700' },
+  modalDivider: {
+    height: 1,
+    backgroundColor: semantic.divider,
+    marginVertical: space.sm,
+  },
+  modalGridCell: {
+    width: 40,
+    height: 32,
+    borderRadius: radius.sm,
+    backgroundColor: semantic.controlBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalGridCellOn: { backgroundColor: semantic.brand },
+  modalBtn: {
+    marginTop: space.md,
+    minHeight: 36,
+    borderRadius: radius.sm,
+    backgroundColor: semantic.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnText: { fontSize: fs.sm, color: semantic.onBrand, fontWeight: '700' },
+});

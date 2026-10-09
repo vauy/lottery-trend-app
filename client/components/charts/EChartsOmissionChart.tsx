@@ -10,9 +10,36 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ECHARTS_SOURCE } from '@/lib/echartsSource';
+import { palette, semantic } from '@/lib/theme';
 
 type SeriesPoint = { issue: string; omission: number };
 type ChartMode = 'both' | 'level1' | 'level2';
+
+/** 图表配色：直接取 prototype 换算后的设计 token */
+const CH = {
+  /** 网格 / 坐标轴线 */
+  line: palette.line,
+  /** 坐标刻度文字 */
+  tick: palette.inkFaint,
+  /** 标题文字 */
+  title: palette.inkDim,
+  /** 主序列（一阶 / 二阶折线） */
+  main: palette.accent,
+  /** MA5 —— 原型 drawAmp 的 MA5 = amber */
+  ma5: palette.amber,
+  /** MA10 */
+  ma10: semantic.hot,
+  /** MA20 —— 原型 drawAmp 的 MA20 = cyan */
+  ma20: semantic.cold,
+  /** 遗漏值球 / 历史最大线 */
+  hot: semantic.hot,
+  /** 开出球（遗漏 0）/ 平均线 */
+  cold: semantic.cold,
+  /** 特殊标记球（第 5/10/20 个、? 球） */
+  dan: semantic.dan,
+  /** 理论遗漏线 */
+  theory: palette.inkDim,
+};
 
 const RANGES = [
   { min: 0, max: 0, label: '0' },
@@ -52,7 +79,7 @@ export function EChartsOmissionChart({
     const trimmed = series.length > MAX_SHOW ? series.slice(-MAX_SHOW) : series;
     const n = trimmed.length;
     if (n === 0) {
-      return '<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:12px">暂无数据</body></html>';
+      return `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:${CH.tick};font-size:12px">暂无数据</body></html>`;
     }
 
     const missValues = trimmed.map((p) => p.omission);
@@ -111,7 +138,7 @@ export function EChartsOmissionChart({
         lastValid = k;
       }
     }
-    const secondBalls = secondOrder.map((p) => ({ x: p.x, y: p.y, color: '#e5484d', text: String(p.y) }));
+    const secondBalls = secondOrder.map((p) => ({ x: p.x, y: p.y, color: CH.hot, text: String(p.y) }));
     const secondMax = niceMax(Math.max(1, ...secondOrder.map((p) => p.y)));
 
     // === 一阶球（每个开出点一个 + 末尾 ? 点）===
@@ -121,23 +148,23 @@ export function EChartsOmissionChart({
     const balls: { x: number; y: number; color: string; text: string }[] = [];
     for (let k = 0; k < nOpens; k += 1) {
       const m = missArr[k];
-      let color = m === 0 ? '#22c55e' : '#e5484d';
+      let color: string = m === 0 ? CH.main : CH.hot;
       const fromRight = nOpens - 1 - k; // 0 = 最右
-      if (fromRight === 4) color = '#2563eb';       // 从右数第 5 个 → 蓝
-      else if (fromRight === 9) color = '#22c55e';  // 从右数第 10 个 → 绿
-      else if (fromRight === 19) color = '#8b5cf6'; // 从右数第 20 个 → 紫
-      if (fromRight === 0) color = '#2563eb';       // 当前期（最右开出球）→ 蓝
+      if (fromRight === 4) color = CH.cold;       // 从右数第 5 个 → cyan
+      else if (fromRight === 9) color = CH.main;  // 从右数第 10 个 → accent
+      else if (fromRight === 19) color = CH.dan;  // 从右数第 20 个 → amber
+      if (fromRight === 0) color = CH.cold;       // 当前期（最右开出球）→ cyan
       balls.push({ x: k, y: m, color, text: String(m) });
     }
     // 当前期未开出 → 补蓝球；已开出 → 循环最右球已改蓝
     const latestOpened = missValues[n - 1] === 0;
     let tailX = nOpens - 1;
     if (!latestOpened) {
-      balls.push({ x: nOpens, y: currentMiss, color: '#2563eb', text: String(currentMiss) });
+      balls.push({ x: nOpens, y: currentMiss, color: CH.cold, text: String(currentMiss) });
       tailX = nOpens;
     }
     // ? 球（下一期，未开奖）始终显示
-    balls.push({ x: tailX + 1, y: currentMiss, color: '#8b5cf6', text: '?' });
+    balls.push({ x: tailX + 1, y: currentMiss, color: CH.dan, text: '?' });
 
     // === 折线数据 ===
     const linePoints: [number, number][] = missArr.map((v, k) => [k, v]);
@@ -173,12 +200,12 @@ export function EChartsOmissionChart({
 
     const graphic: any[] = [];
     if (isBoth) {
-      graphic.push({ type: 'text', left: 'center', top: 6, style: { text: secondTitle, fontSize: 10, fill: '#8a8f98' } });
-      graphic.push({ type: 'text', left: 'center', top: '51%', style: { text: firstTitle, fontSize: 10, fill: '#8a8f98' } });
+      graphic.push({ type: 'text', left: 'center', top: 6, style: { text: secondTitle, fontSize: 10, fill: CH.title } });
+      graphic.push({ type: 'text', left: 'center', top: '51%', style: { text: firstTitle, fontSize: 10, fill: CH.title } });
     } else if (isL2) {
-      graphic.push({ type: 'text', left: 'center', top: 6, style: { text: secondTitle, fontSize: 10, fill: '#8a8f98' } });
+      graphic.push({ type: 'text', left: 'center', top: 6, style: { text: secondTitle, fontSize: 10, fill: CH.title } });
     } else {
-      graphic.push({ type: 'text', left: 'center', top: 6, style: { text: firstTitle, fontSize: 10, fill: '#8a8f98' } });
+      graphic.push({ type: 'text', left: 'center', top: 6, style: { text: firstTitle, fontSize: 10, fill: CH.title } });
     }
 
     const formatXLabel = (v: number) => {
@@ -199,14 +226,14 @@ export function EChartsOmissionChart({
         min: 0,
         max: xMax,
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: 'rgba(140,140,150,0.35)' } },
+        axisLine: { lineStyle: { color: CH.line } },
         axisLabel: (isBoth && orig === 0)
           ? { show: false }
-          : { show: true, fontSize: 7, color: '#8a8f98', formatter: formatXLabel },
+          : { show: true, fontSize: 7, color: CH.tick, formatter: formatXLabel },
         splitLine: {
           show: true,
           interval: 4,
-          lineStyle: { color: 'rgba(140,140,150,0.22)', type: 'dashed' },
+          lineStyle: { color: CH.line, type: 'dashed' },
         },
       };
     };
@@ -223,9 +250,9 @@ export function EChartsOmissionChart({
         splitNumber: 12,
         splitLine: {
           show: true,
-          lineStyle: { color: 'rgba(140,140,150,0.22)', type: 'dashed' },
+          lineStyle: { color: CH.line, type: 'dashed' },
         },
-        axisLabel: { fontSize: 8, color: '#8a8f98' },
+        axisLabel: { fontSize: 8, color: CH.tick },
       };
     };
 
@@ -240,7 +267,7 @@ export function EChartsOmissionChart({
       makeSeries(0, {
         type: 'line',
         data: secondOrder.map((p) => [p.x, p.y]),
-        lineStyle: { color: '#1f2937', width: 1 },
+        lineStyle: { color: CH.main, width: 1 },
         itemStyle: { color: 'transparent' },
         symbol: 'none',
         z: 2,
@@ -267,7 +294,7 @@ export function EChartsOmissionChart({
       makeSeries(1, {
         type: 'line',
         data: linePoints,
-        lineStyle: { color: '#1f2937', width: 1.2 },
+        lineStyle: { color: CH.main, width: 1.2 },
         itemStyle: { color: 'transparent' },
         symbol: 'none',
         z: 2,
@@ -277,10 +304,10 @@ export function EChartsOmissionChart({
           label: { show: false },
           data: [
             ...(theoryMiss > 0
-              ? [{ yAxis: theoryMiss, lineStyle: { color: '#1f2937', width: 1.2, type: 'solid' } }]
+              ? [{ yAxis: theoryMiss, lineStyle: { color: CH.theory, width: 1.2, type: 'solid' } }]
               : []),
-            { yAxis: maxMiss, lineStyle: { color: '#ef4444', width: 1, type: 'dashed' } },
-            { yAxis: avgMiss, lineStyle: { color: '#3b82f6', width: 1, type: 'dashed' } },
+            { yAxis: maxMiss, lineStyle: { color: CH.hot, width: 1, type: 'dashed' } },
+            { yAxis: avgMiss, lineStyle: { color: CH.cold, width: 1, type: 'dashed' } },
           ],
         },
       }),
@@ -288,7 +315,7 @@ export function EChartsOmissionChart({
       makeSeries(1, {
         type: 'line',
         data: ma5.map((v, i) => (v === null ? null : [i, v])),
-        lineStyle: { color: '#3b82f6', width: 1 },
+        lineStyle: { color: CH.ma5, width: 1 },
         itemStyle: { color: 'transparent' },
         symbol: 'none',
         z: 1,
@@ -297,7 +324,7 @@ export function EChartsOmissionChart({
       makeSeries(1, {
         type: 'line',
         data: ma10.map((v, i) => (v === null ? null : [i, v])),
-        lineStyle: { color: '#22c55e', width: 1 },
+        lineStyle: { color: CH.ma10, width: 1 },
         itemStyle: { color: 'transparent' },
         symbol: 'none',
         z: 1,
@@ -306,7 +333,7 @@ export function EChartsOmissionChart({
       makeSeries(1, {
         type: 'line',
         data: ma20.map((v, i) => (v === null ? null : [i, v])),
-        lineStyle: { color: '#e879f9', width: 1 },
+        lineStyle: { color: CH.ma20, width: 1 },
         itemStyle: { color: 'transparent' },
         symbol: 'none',
         z: 1,
@@ -333,7 +360,7 @@ export function EChartsOmissionChart({
 
     const option = {
       animation: false,
-      backgroundColor: '#ffffff',
+      backgroundColor: 'transparent',
       grid,
       graphic,
       xAxis: [makeXAxis(0), makeXAxis(1)].filter(Boolean),
@@ -372,7 +399,7 @@ export function EChartsOmissionChart({
     <View style={{ width }}>
       {showRangeBar && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <Text style={{ fontSize: 11, color: '#888' }}>二阶范围:</Text>
+          <Text style={{ fontSize: 11, color: CH.title }}>二阶范围:</Text>
           {RANGES.map((r, i) => (
             <Pressable
               key={r.label}
@@ -381,13 +408,13 @@ export function EChartsOmissionChart({
                 paddingHorizontal: 8,
                 paddingVertical: 3,
                 borderRadius: 4,
-                backgroundColor: rangeIdx === i ? '#2563eb' : '#f3f4f6',
+                backgroundColor: rangeIdx === i ? palette.accent : palette.surface2,
               }}
             >
               <Text
                 style={{
                   fontSize: 10,
-                  color: rangeIdx === i ? '#fff' : '#111827',
+                  color: rangeIdx === i ? palette.accentInk : palette.inkDim,
                   fontWeight: rangeIdx === i ? 'bold' : '400',
                 }}
               >

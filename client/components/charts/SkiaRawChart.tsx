@@ -4,18 +4,35 @@
  */
 import React from 'react';
 import { View, Text } from 'react-native';
-import { Canvas, Circle, Line as SkLine, Path as SkPath, Skia, vec } from '@shopify/react-native-skia';
+import {
+  Canvas,
+  Circle,
+  Line as SkLine,
+  Path as SkPath,
+  DashPathEffect,
+  Skia,
+  vec,
+} from '@shopify/react-native-skia';
+import { palette, semantic } from '@/lib/theme';
 
 type RawPoint = { issue: string; value: number };
 
-const LINE_COLOR = '#1f2937';
-const DOT_COLOR = '#e5484d';
-const MA5_COLOR = '#3b82f6';
-const MA10_COLOR = '#22c55e';
-const MA20_COLOR = '#e879f9';
-const AVG_COLOR = '#000000';
-const GRID_COLOR = 'rgba(140,140,150,0.2)';
-const LABEL_COLOR = '#8a8f98';
+/** 主折线（原型 drawAmp 主线 = accent） */
+const LINE_COLOR = palette.accent;
+/** 数值球（热） */
+const DOT_COLOR = semantic.hot;
+/** 均线：MA5 = amber（原型）/ MA10 = red / MA20 = cyan（原型） */
+const MA5_COLOR = palette.amber;
+const MA10_COLOR = semantic.hot;
+const MA20_COLOR = semantic.cold;
+/** 总平均线（原型 C.ink 虚线） */
+const AVG_COLOR = palette.inkDim;
+/** 网格线 */
+const GRID_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
+/** 标题文字 */
+const TITLE_COLOR = palette.inkDim;
 
 const MAX_SHOW = 200;
 const TAIL_PAD = 40;
@@ -41,7 +58,7 @@ export function SkiaRawChart({
   if (n === 0) {
     return (
       <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ fontSize: 11, color: '#888' }}>暂无数据</Text>
+        <Text style={{ fontSize: 11, color: TICK_COLOR }}>暂无数据</Text>
       </View>
     );
   }
@@ -114,7 +131,7 @@ export function SkiaRawChart({
           zIndex: 10,
         }}
       >
-        <Text style={{ fontSize: 10, color: LABEL_COLOR }}>{titleText}</Text>
+        <Text style={{ fontSize: 10, color: TITLE_COLOR }}>{titleText}</Text>
       </View>
 
       <Canvas style={{ width, height }}>
@@ -136,13 +153,15 @@ export function SkiaRawChart({
         {/* 均线 MA5（绿） */}
         <SkPath path={ma5Path} color={MA5_COLOR} style="stroke" strokeWidth={1} />
 
-        {/* 总平均线（黑实线） */}
+        {/* 总平均线（原型：ink 虚线 0.8） */}
         <SkLine
           p1={vec(pad.left, yFor(avgValue))}
           p2={vec(width - pad.right, yFor(avgValue))}
           color={AVG_COLOR}
-          strokeWidth={1.5}
-        />
+          strokeWidth={1}
+        >
+          <DashPathEffect intervals={[4, 4]} />
+        </SkLine>
 
         {/* 主折线 */}
         <SkPath path={linePath} color={LINE_COLOR} style="stroke" strokeWidth={1.2} />
@@ -164,7 +183,7 @@ export function SkiaRawChart({
             width: pad.left - 3,
             textAlign: 'right',
             fontSize: 8,
-            color: LABEL_COLOR,
+            color: TICK_COLOR,
           }}
         >
           {v.toFixed(0)}
@@ -209,7 +228,7 @@ export function SkiaRawChart({
               width: 36,
               textAlign: 'center',
               fontSize: 8,
-              color: LABEL_COLOR,
+              color: TICK_COLOR,
             }}
           >
             {p.issue.slice(-3)}

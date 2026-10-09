@@ -6,12 +6,18 @@ import { View, ScrollView, useWindowDimensions, Text } from 'react-native';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import type { TargetPoint } from '@/lib/lottery/targets';
 import { scaleLinear } from './chartUtils';
+import { palette, semantic } from '@/lib/theme';
 
-const RED = '#e5484d';
-const CYAN = '#22d3ee';
-const AXIS_COLOR = 'rgba(140,140,150,0.35)';
-const ZERO_COLOR = '#6b7280';
-const LABEL_COLOR = '#8a8f98';
+/** 升档 = 热（red）/ 降档 = 冷（cyan） */
+const UP = semantic.hot;
+const DOWN = semantic.cold;
+/** 网格线 / 坐标轴线 */
+const AXIS_COLOR = palette.line;
+const ZERO_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
+/** 标题文字 */
+const TITLE_COLOR = palette.inkDim;
 
 const BAR_W = 4;
 const COL_SPACING = 6;
@@ -115,7 +121,7 @@ export function OmissionKChart({
     <View style={{ width, height: totalHeight, position: 'relative' }}>
       {/* 悬浮标题 */}
       <View pointerEvents="none" style={{ position: 'absolute', top: 2, left: 0, right: 0, alignItems: 'center', zIndex: 10 }}>
-        <Text style={{ fontSize: 10, color: titleColor ?? '#8a8f98' }}>
+        <Text style={{ fontSize: 10, color: titleColor ?? TITLE_COLOR }}>
           遗漏K线（历史最大:{maxMiss} 平均:{avgMiss.toFixed(2)} 理论:{theoryMiss.toFixed(2)} 当前:{curMiss}）
         </Text>
       </View>
@@ -126,7 +132,7 @@ export function OmissionKChart({
             return (
               <React.Fragment key={`g-${idx}`}>
                 <Line x1={pad.left} y1={y} x2={chartWidth - pad.right} y2={y} stroke={AXIS_COLOR} strokeWidth={1} />
-                <SvgText x={pad.left - 3} y={y + 3} fontSize={fontTick} fill={LABEL_COLOR} textAnchor="end">
+                <SvgText x={pad.left - 3} y={y + 3} fontSize={fontTick} fill={TICK_COLOR} textAnchor="end">
                   {v.toFixed(0)}
                 </SvgText>
               </React.Fragment>
@@ -135,7 +141,7 @@ export function OmissionKChart({
 
           {bars.map((b, i) => {
             const cx = xForBar(i);
-            const color = b.isRed ? RED : CYAN;
+            const color = b.isRed ? UP : DOWN;
             const yO = yScale(b.o);
             const yC = yScale(b.c);
             const bodyTop = Math.min(yO, yC);
@@ -146,7 +152,7 @@ export function OmissionKChart({
           {bars.map((b, i) =>
             i % xLabelStep === 0 || i === bars.length - 1 ? (
               <SvgText key={`x-${i}`} x={xForBar(i)} y={totalHeight - 6}
-                fontSize={fontTick} fill={LABEL_COLOR} textAnchor="middle">
+                fontSize={fontTick} fill={TICK_COLOR} textAnchor="middle">
                 {b.issue.slice(-3)}
               </SvgText>
             ) : null,

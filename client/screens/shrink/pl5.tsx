@@ -2,10 +2,29 @@
  * 排列5 缩水页 —— 独立实现，不复用 3D 逻辑。
  */
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { Screen } from '@/components/Screen';
+import {
+  BottomBar,
+  Chip,
+  DigitGrid,
+  Field,
+  Legend,
+  Panel,
+  ResultBanner,
+  Segmented,
+} from '@/components/ui/Kit';
+import { fontSize as fs, semantic, space, touch } from '@/lib/theme';
 
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 const SUM_RANGE = Array.from({ length: 46 }, (_, i) => i); // 0-45
@@ -125,7 +144,36 @@ function classifyPl5(codes: string[]): { noRep: string[]; hasRep: string[] } {
   return { noRep, hasRep };
 }
 
+/** 原型 .fold > .group：可折叠筛选分组 */
+function Fold({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <View style={styles.foldGroup}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={styles.foldSummary}
+        accessibilityState={{ expanded: open }}
+      >
+        <Text style={[styles.foldTitle, open && styles.foldTitleOn]}>{title}</Text>
+        <Text style={[styles.foldArrow, open && styles.foldTitleOn]}>{open ? '▾' : '▸'}</Text>
+      </Pressable>
+      {open ? <View style={styles.foldBody}>{children}</View> : null}
+    </View>
+  );
+}
+
 export default function Pl5ShrinkScreen() {
+  const { width, height } = useWindowDimensions();
+  const landscape = width >= 860 || width > height;
+
   const [dan, setDan] = useState<number[]>([]);
   const [tuo, setTuo] = useState<number[]>([]);
   const [filters, setFilters] = useState<Pl5Filters>(emptyPl5Filters());
@@ -171,11 +219,6 @@ export default function Pl5ShrinkScreen() {
     router.push({ pathname: '/(tabs)/analyze', params: { codes, mode: 'zhixuan', game: 'pl5' } });
   };
 
-  const btn = (active: boolean) =>
-    `rounded items-center justify-center ${active ? 'bg-accent' : 'bg-surface-secondary border border-border'}`;
-  const txt = (active: boolean) =>
-    `font-bold ${active ? 'text-accent-foreground' : 'text-muted'}`;
-
   const toggleArr = (key: keyof Pl5Filters, v: number) => {
     setFilters((p) => {
       const arr = p[key] as number[];
@@ -183,34 +226,23 @@ export default function Pl5ShrinkScreen() {
     });
   };
 
-  const cardHeader = (title: string, onClear: () => void) => (
-    <View className="flex-row items-center justify-between mb-2">
-      <Text className="text-xs text-muted">{title}</Text>
-      <Pressable onPress={onClear}><Text className="text-[10px] text-accent font-bold">清</Text></Pressable>
-    </View>
+  // 通用：数字格（44px 触控）
+  const digitGrid = (key: keyof Pl5Filters, columns = 5, digits: number[] = DIGITS) => (
+    <DigitGrid
+      digits={digits}
+      selected={filters[key] as number[]}
+      onToggle={(d) => toggleArr(key, d)}
+      columns={columns}
+    />
   );
 
-  const numRow = (label: string, key: keyof Pl5Filters, options: number[], labelWidth = 36) => {
-    const arr = filters[key] as number[];
-    return (
-      <View className="flex-row items-center flex-wrap gap-1 mb-1">
-        <Text className="text-xs text-muted" style={{ width: labelWidth }}>{label}</Text>
-        {options.map((v) => {
-          const active = arr.includes(v);
-          return (
-            <Pressable key={v} onPress={() => toggleArr(key, v)}
-              className={btn(active)} style={{ width: 24, height: 24 }}>
-              <Text className={`text-[10px] ${txt(active)}`}>{v}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    );
-  };
+  // 通用：「说明 + 数字格」字段
+  const digitField = (caption: string, key: keyof Pl5Filters, columns = 5, digits: number[] = DIGITS) => (
+    <Field caption={caption}>{digitGrid(key, columns, digits)}</Field>
+  );
 
   const renderPosFilter = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      <Text className="text-xs text-muted mb-2">定位（默认全选，点击取消）</Text>
+    <Fold title="定位（默认全选，点击取消）">
       {([
         { label: '万位', key: 'posWan' as const },
         { label: '千位', key: 'posQian' as const },
@@ -220,219 +252,264 @@ export default function Pl5ShrinkScreen() {
       ] as const).map(({ label, key }) => {
         const allSelected = filters[key].length === 10;
         return (
-          <View key={key} className="flex-row items-center flex-wrap gap-1 mb-2">
-            <Text className="text-xs text-muted" style={{ width: 32 }}>{label}</Text>
-            {DIGITS.map((d) => {
-              const active = filters[key].includes(d);
-              return (
-                <Pressable key={d} onPress={() => toggleArr(key, d)}
-                  className={btn(active)} style={{ width: 24, height: 24 }}>
-                  <Text className={`text-[10px] ${txt(active)}`}>{d}</Text>
-                </Pressable>
-              );
-            })}
-            <Pressable
+          <View key={key}>
+            {digitField(label, key)}
+            <Chip
+              label="全选"
+              active={allSelected}
               onPress={() => setFilters((p) => ({ ...p, [key]: allSelected ? [] : [...DIGITS] }))}
-              className={btn(allSelected)} style={{ width: 28, height: 24 }}>
-              <Text className={`text-[10px] ${txt(allSelected)}`}>全</Text>
-            </Pressable>
+            />
           </View>
         );
       })}
-    </View>
+    </Fold>
   );
 
-  const renderDanCountFilter = () => {
-    const rows = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]];
-    return (
-      <View className="bg-white rounded-xl border border-border p-3 mb-2">
-        {cardHeader('胆码出现次数（0-5，不限=不筛）', () => {
-          const nc: Record<number, number | null> = {};
-          for (let i = 0; i <= 9; i += 1) nc[i] = null;
-          setFilters((p) => ({ ...p, danCount: nc }));
-        })}
-        {rows.map((row, ri) => (
-          <View key={ri} className="flex-row items-center gap-1 mb-2">
-            {row.map((d) => (
-              <View key={d} className="flex-1 items-center">
-                <Text className="text-sm font-bold text-foreground mb-1">{d}</Text>
-                <Pressable
-                  onPress={() => setFilters((p) => ({ ...p, danCount: { ...p.danCount, [d]: null } }))}
-                  className={btn(filters.danCount[d] === null)}
-                  style={{ width: '100%', height: 20, marginBottom: 2 }}>
-                  <Text className={`text-[9px] ${txt(filters.danCount[d] === null)}`}>不限</Text>
-                </Pressable>
-                <View className="flex-row gap-0.5" style={{ width: '100%' }}>
-                  {COUNT_05.map((cnt) => (
-                    <Pressable key={cnt}
-                      onPress={() => setFilters((p) => ({ ...p, danCount: { ...p.danCount, [d]: cnt } }))}
-                      className={btn(filters.danCount[d] === cnt)}
-                      style={{ flex: 1, height: 18 }}>
-                      <Text className={`text-[9px] ${txt(filters.danCount[d] === cnt)}`}>{cnt}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ))}
-          </View>
-        ))}
+  const renderDanCountFilter = () => (
+    <Fold title="胆码出现次数（0-5，不限=不筛）">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="全部不限"
+          active={false}
+          onPress={() => {
+            const nc: Record<number, number | null> = {};
+            for (let i = 0; i <= 9; i += 1) nc[i] = null;
+            setFilters((p) => ({ ...p, danCount: nc }));
+          }}
+        />
       </View>
-    );
-  };
+      {DIGITS.map((d) => {
+        const cur = filters.danCount[d];
+        return (
+          <View key={d} style={styles.danRow}>
+            <Text style={styles.danRowLabel}>{d}</Text>
+            <View style={styles.danRowCtl}>
+              <Segmented<string>
+                options={[
+                  { value: 'none', label: '不限' },
+                  ...COUNT_05.map((c) => ({ value: String(c), label: String(c) })),
+                ]}
+                value={cur === null ? 'none' : String(cur)}
+                onChange={(v) =>
+                  setFilters((p) => ({
+                    ...p,
+                    danCount: { ...p.danCount, [d]: v === 'none' ? null : Number(v) },
+                  }))
+                }
+              />
+            </View>
+          </View>
+        );
+      })}
+    </Fold>
+  );
 
   const renderFormCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('形态（数量可多选，不选=不限）', () =>
-        setFilters((p) => ({ ...p, bigSmall: [], oddEven: [], primeCount: [] })))}
-      {numRow('大', 'bigSmall', COUNT_05)}
-      {numRow('单', 'oddEven', COUNT_05)}
-      {numRow('质', 'primeCount', COUNT_05)}
-    </View>
+    <Fold title="形态（数量可多选，不选=不限）">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="清空形态"
+          active={false}
+          onPress={() => setFilters((p) => ({ ...p, bigSmall: [], oddEven: [], primeCount: [] }))}
+        />
+      </View>
+      {digitField('大个数', 'bigSmall', 6, COUNT_05)}
+      {digitField('单个数', 'oddEven', 6, COUNT_05)}
+      {digitField('质个数', 'primeCount', 6, COUNT_05)}
+    </Fold>
   );
 
   const renderSumCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('和值（0-45，可多选）', () => setFilters((p) => ({ ...p, sum: [] })))}
-      <View className="flex-row flex-wrap gap-1">
-        {SUM_RANGE.map((v) => {
-          const active = filters.sum.includes(v);
-          return (
-            <Pressable key={v} onPress={() => toggleArr('sum', v)}
-              className={btn(active)} style={{ width: 26, height: 24 }}>
-              <Text className={`text-[10px] ${txt(active)}`}>{v}</Text>
-            </Pressable>
-          );
-        })}
+    <Fold title="和值（0-45，可多选）">
+      <View style={styles.chipWrap}>
+        <Chip label="清空和值" active={false} onPress={() => setFilters((p) => ({ ...p, sum: [] }))} />
       </View>
-    </View>
+      {digitField('和值', 'sum', 7, SUM_RANGE)}
+    </Fold>
   );
 
   const renderSumTailSpanCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('和值尾 / 跨度', () => setFilters((p) => ({ ...p, sumTail: [], span: [] })))}
-      {numRow('和值尾', 'sumTail', TAIL_09)}
-      {numRow('跨度', 'span', TAIL_09)}
-    </View>
+    <Fold title="和值尾 / 跨度">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="清空"
+          active={false}
+          onPress={() => setFilters((p) => ({ ...p, sumTail: [], span: [] }))}
+        />
+      </View>
+      {digitField('和值尾', 'sumTail', 5, TAIL_09)}
+      {digitField('跨度', 'span', 5, TAIL_09)}
+    </Fold>
   );
 
   const renderRoadCard = () => (
-    <View className="bg-white rounded-xl border border-border p-3 mb-2">
-      {cardHeader('012 路个数（可多选）', () =>
-        setFilters((p) => ({ ...p, road0: [], road1: [], road2: [] })))}
-      {numRow('0路', 'road0', COUNT_05)}
-      {numRow('1路', 'road1', COUNT_05)}
-      {numRow('2路', 'road2', COUNT_05)}
+    <Fold title="012 路个数（可多选）">
+      <View style={styles.chipWrap}>
+        <Chip
+          label="清空路数"
+          active={false}
+          onPress={() => setFilters((p) => ({ ...p, road0: [], road1: [], road2: [] }))}
+        />
+      </View>
+      {digitField('0路个数', 'road0', 6, COUNT_05)}
+      {digitField('1路个数', 'road1', 6, COUNT_05)}
+      {digitField('2路个数', 'road2', 6, COUNT_05)}
+    </Fold>
+  );
+
+  const leftCol = (
+    <View style={[styles.col, landscape && styles.colLeft]}>
+      <Panel label="胆拖 · 排列5">
+        <Field caption="胆码（不选=全选 100000 注，可多选）">
+          <DigitGrid digits={DIGITS} selected={dan} onToggle={toggleDan} columns={5} />
+        </Field>
+        <Field caption="拖码（可选）">
+          <DigitGrid digits={DIGITS} selected={tuo} onToggle={toggleTuo} columns={5} />
+        </Field>
+      </Panel>
+
+      <View style={styles.chipWrap}>
+        <Chip label="筛选条件" active={showFilters} onPress={() => setShowFilters((v) => !v)} />
+        {!isPl5FilterEmpty(filters) ? (
+          <Chip label="清除所有筛选" active={false} onPress={() => setFilters(emptyPl5Filters())} />
+        ) : null}
+        <Chip label="重置全部" active={false} onPress={reset} />
+      </View>
+
+      {showFilters ? (
+        <View style={styles.fold}>
+          {renderPosFilter()}
+          {renderDanCountFilter()}
+          {renderFormCard()}
+          {renderSumCard()}
+          {renderSumTailSpanCard()}
+          {renderRoadCard()}
+        </View>
+      ) : null}
+    </View>
+  );
+
+  const rightCol = (
+    <View style={styles.col}>
+      <ResultBanner
+        items={[
+          { value: String(result.length), label: '直选注数' },
+          { value: String(zuxuanList.length), label: '组选注数' },
+          { value: `${result.length * 2} 元`, label: '直选金额' },
+          { value: `${zuxuanList.length * 2} 元`, label: '组选金额' },
+        ]}
+      />
+
+      <Panel label="分 类">
+        <Text style={styles.line}>直选 无重复 {zx.noRep.length} · 有重复 {zx.hasRep.length}</Text>
+        <Text style={styles.line}>组选 无重复 {zux.noRep.length} · 有重复 {zux.hasRep.length}</Text>
+        <Text style={styles.hint}>
+          原始 {rawResult.length} 注 → 筛选后 直选 {result.length} 注 · 组选 {zuxuanList.length} 注
+        </Text>
+      </Panel>
+
+      <Panel label="复 制">
+        <View style={styles.chipWrap}>
+          {[
+            { label: `直选全部(${result.length})`, codes: result },
+            { label: `直选无重复(${zx.noRep.length})`, codes: zx.noRep },
+            { label: `直选有重复(${zx.hasRep.length})`, codes: zx.hasRep },
+            { label: `组选全部(${zuxuanList.length})`, codes: zuxuanList },
+            { label: `组选无重复(${zux.noRep.length})`, codes: zux.noRep },
+            { label: `组选有重复(${zux.hasRep.length})`, codes: zux.hasRep },
+          ].map((b) => (
+            <Chip
+              key={b.label}
+              label={b.label}
+              active={false}
+              onPress={() => { void copy(b.codes.join(' '), b.label); }}
+            />
+          ))}
+        </View>
+      </Panel>
+
+      <Legend
+        items={[
+          { color: semantic.dan, label: '已选 / 胆码' },
+          { color: semantic.cold, label: '组选号码' },
+          { color: semantic.text, label: '直选号码' },
+        ]}
+      />
     </View>
   );
 
   return (
-    <Screen safeAreaEdges={['top', 'left', 'right']}>
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 12, paddingBottom: 24 }}>
-        {/* 胆码 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-xs text-muted mb-2">胆码（不选=全选 100000 注，可多选）</Text>
-          <View className="flex-row flex-wrap gap-1.5">
-            {DIGITS.map((d) => {
-              const active = dan.includes(d);
-              return (
-                <Pressable key={d} onPress={() => toggleDan(d)} className={btn(active)}
-                  style={{ width: 32, height: 32 }}>
-                  <Text className={`text-sm ${txt(active)}`}>{d}</Text>
-                </Pressable>
-              );
-            })}
+    <Screen
+      safeAreaEdges={['top', 'left', 'right']}
+      backgroundColor={semantic.pageBg}
+      statusBarStyle="light"
+    >
+      <View style={styles.page}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, landscape && styles.scrollContentWide]}
+        >
+          <View style={[styles.split, landscape && styles.splitLandscape]}>
+            {leftCol}
+            {rightCol}
           </View>
-        </View>
-
-        {/* 拖码 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-xs text-muted mb-2">拖码（可选）</Text>
-          <View className="flex-row flex-wrap gap-1.5">
-            {DIGITS.map((d) => {
-              const active = tuo.includes(d);
-              return (
-                <Pressable key={d} onPress={() => toggleTuo(d)} className={btn(active)}
-                  style={{ width: 32, height: 32 }}>
-                  <Text className={`text-sm ${txt(active)}`}>{d}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* 筛选开关 */}
-        <View className="flex-row items-center gap-2 mb-2">
-          <Pressable onPress={() => setShowFilters((v) => !v)} className={btn(showFilters)}
-            style={{ paddingHorizontal: 10, height: 28 }}>
-            <Text className={`text-xs ${txt(showFilters)}`}>{showFilters ? '▼' : '▶'} 筛选条件</Text>
-          </Pressable>
-          {!isPl5FilterEmpty(filters) && (
-            <Pressable onPress={() => setFilters(emptyPl5Filters())} className={btn(false)}
-              style={{ paddingHorizontal: 10, height: 28 }}>
-              <Text className="text-xs text-foreground">清除所有筛选</Text>
-            </Pressable>
-          )}
-          <Pressable onPress={reset} className={btn(false)}
-            style={{ paddingHorizontal: 10, height: 28 }}>
-            <Text className="text-xs text-foreground">重置全部</Text>
-          </Pressable>
-        </View>
-
-        {showFilters && (
-          <>
-            {renderPosFilter()}
-            {renderDanCountFilter()}
-            {renderFormCard()}
-            {renderSumCard()}
-            {renderSumTailSpanCard()}
-            {renderRoadCard()}
-          </>
-        )}
-
-        {/* 摘要 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-sm font-bold text-foreground">
-            直选 {result.length} 注 · 组选 {zuxuanList.length} 注
-          </Text>
-          <Text className="text-xs text-muted mt-1">
-            直选 无重复 {zx.noRep.length} · 有重复 {zx.hasRep.length}
-          </Text>
-          <Text className="text-xs text-muted mt-1">
-            组选 无重复 {zux.noRep.length} · 有重复 {zux.hasRep.length}
-          </Text>
-          <Text className="text-xs text-muted mt-1">
-            金额：直选 {result.length * 2} 元 · 组选 {zuxuanList.length * 2} 元
-          </Text>
-        </View>
-
-        {/* 复制按钮 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Text className="text-xs text-muted mb-2">复制</Text>
-          <View className="flex-row flex-wrap gap-1.5">
-            {[
-              { label: `直选全部(${result.length})`, codes: result },
-              { label: `直选无重复(${zx.noRep.length})`, codes: zx.noRep },
-              { label: `直选有重复(${zx.hasRep.length})`, codes: zx.hasRep },
-              { label: `组选全部(${zuxuanList.length})`, codes: zuxuanList },
-              { label: `组选无重复(${zux.noRep.length})`, codes: zux.noRep },
-              { label: `组选有重复(${zux.hasRep.length})`, codes: zux.hasRep },
-            ].map((b) => (
-              <Pressable key={b.label} onPress={() => void copy(b.codes.join(' '), b.label)}
-                className={btn(false)} style={{ paddingHorizontal: 10, height: 28 }}>
-                <Text className={`text-[11px] ${txt(false)}`}>{b.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        {/* 出图 */}
-        <View className="bg-white rounded-xl border border-border p-3 mb-2">
-          <Pressable onPress={onChart} className={btn(true)}
-            style={{ paddingHorizontal: 14, height: 32, alignSelf: 'flex-start' }}>
-            <Text className={`text-xs ${txt(true)}`}>出图（跳转分析页）</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+        </ScrollView>
+        <BottomBar
+          primaryLabel="生 成"
+          onPrimary={onChart}
+          ghostLabel="清空"
+          onGhost={reset}
+          vertical={landscape}
+          hint={`原始 ${rawResult.length} 注 → 直选 ${result.length} 注 · 组选 ${zuxuanList.length} 注`}
+        />
+      </View>
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  page: { flex: 1, backgroundColor: semantic.pageBg },
+  scroll: { flex: 1 },
+  scrollContent: { padding: space.md, paddingBottom: space.xxl, gap: space.md },
+  scrollContentWide: { paddingHorizontal: space.lg },
+
+  split: { flexDirection: 'column', gap: space.md },
+  splitLandscape: { flexDirection: 'row', alignItems: 'flex-start' },
+  col: { flexDirection: 'column', gap: space.md, flexShrink: 1 },
+  colLeft: { width: 320, flexGrow: 0, flexShrink: 0 },
+
+  fold: { flexDirection: 'column', gap: space.md },
+  foldGroup: {
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: 10,
+    backgroundColor: semantic.panelBg,
+    overflow: 'hidden',
+  },
+  foldSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: space.md,
+    paddingVertical: 11,
+    minHeight: touch.min,
+  },
+  foldTitle: { fontSize: fs.sm, color: semantic.textDim },
+  foldTitleOn: { color: semantic.brand },
+  foldArrow: { fontSize: fs.sm, color: semantic.textFaint },
+  foldBody: { paddingHorizontal: space.md, paddingBottom: space.md },
+
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  danRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.sm },
+  danRowLabel: {
+    fontSize: fs.base,
+    fontWeight: '700',
+    color: semantic.text,
+    width: 18,
+    textAlign: 'center',
+  },
+  danRowCtl: { flex: 1 },
+
+  line: { fontSize: fs.sm, color: semantic.textDim, marginBottom: space.xs },
+  hint: { fontSize: fs.xs, color: semantic.textFaint, lineHeight: 18 },
+});

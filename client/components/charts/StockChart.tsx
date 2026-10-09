@@ -7,15 +7,21 @@ import Svg, { Rect, Line, Path as SvgPath, Circle, Text as SvgText } from 'react
 import type { TrendPoint } from '@/lib/lottery/types';
 import { useChartSize } from './useChartSize';
 import { scaleLinear, buildLinePath, niceMax } from './chartUtils';
+import { palette, semantic } from '@/lib/theme';
 
-const UP_COLOR = '#e5484d';
-const DOWN_COLOR = '#22c55e';
-const MA5 = '#3b82f6';
-const MA10 = '#22c55e';
-const MA20 = '#e879f9';
-const BLACK = '#1f2937';
-const AXIS_COLOR = 'rgba(140,140,150,0.35)';
-const LABEL_COLOR = '#8a8f98';
+/** 涨 / 命中 = 热（red），跌 / 未命中 = 冷（cyan） */
+const UP_COLOR = semantic.hot;
+const DOWN_COLOR = semantic.cold;
+/** 均线：MA5 = amber（原型）/ MA10 = red / MA20 = cyan（原型） */
+const MA5 = palette.amber;
+const MA10 = semantic.hot;
+const MA20 = semantic.cold;
+/** 主折线（遗漏走势） */
+const MAIN_LINE = palette.accent;
+/** 网格线 / 坐标轴线 / 零轴 */
+const AXIS_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
 
 export function StockChart({
   points,
@@ -136,7 +142,7 @@ export function StockChart({
           </>
         ) : (
           <>
-            <Legend color={BLACK} label="遗漏走势" />
+            <Legend color={MAIN_LINE} label="遗漏走势" />
             <Legend color={UP_COLOR} label="命中点" />
             <Legend color={MA5} label="MA5" />
             <Legend color={MA10} label="MA10" />
@@ -150,13 +156,13 @@ export function StockChart({
           <Line key={`g${t}`} x1={pad.left} y1={yScale(t)} x2={width - pad.right} y2={yScale(t)} stroke={AXIS_COLOR} strokeWidth={1} />
         ))}
         {ticks.map((t) => (
-          <SvgText key={`l${t}`} x={pad.left - 4} y={yScale(t) + 3} fontSize={8} fill={LABEL_COLOR} textAnchor="end">
+          <SvgText key={`l${t}`} x={pad.left - 4} y={yScale(t) + 3} fontSize={8} fill={TICK_COLOR} textAnchor="end">
             {t.toFixed(1)}
           </SvgText>
         ))}
 
         {mode === 'frequency' && (
-          <Line x1={pad.left} y1={zeroY} x2={width - pad.right} y2={zeroY} stroke="rgba(140,140,150,0.8)" strokeWidth={1} />
+          <Line x1={pad.left} y1={zeroY} x2={width - pad.right} y2={zeroY} stroke={AXIS_COLOR} strokeWidth={1} />
         )}
 
         {mode === 'frequency' ? (
@@ -182,7 +188,7 @@ export function StockChart({
           <>
             <SvgPath
               d={buildLinePath(values.map((v, i) => ({ x: xFor(i), y: yScale(v) })))}
-              stroke={BLACK}
+              stroke={MAIN_LINE}
               strokeWidth={1}
               fill="none"
             />
@@ -230,7 +236,7 @@ export function StockChart({
 
         {points.map((p, i) =>
           i % xLabelStep === 0 || i === n - 1 ? (
-            <SvgText key={`x-${i}`} x={xFor(i)} y={height - 6} fontSize={9} fill={LABEL_COLOR} textAnchor="middle">
+            <SvgText key={`x-${i}`} x={xFor(i)} y={height - 6} fontSize={9} fill={TICK_COLOR} textAnchor="middle">
               {p.issue.slice(-3)}
             </SvgText>
           ) : null,

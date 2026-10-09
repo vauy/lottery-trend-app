@@ -7,9 +7,17 @@ import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ECHARTS_SOURCE } from '@/lib/echartsSource';
 import type { TargetPoint } from '@/lib/lottery/targets';
+import { palette, semantic } from '@/lib/theme';
 
-const RED = '#e5484d';
-const CYAN = '#22d3ee';
+/** 爬楼梯：升档 = 热（red），降档 = 冷（cyan） */
+const UP = semantic.hot;
+const DOWN = semantic.cold;
+/** 坐标轴线 / 网格线 */
+const AXIS_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
+/** 标题文字 */
+const TITLE_COLOR = palette.inkDim;
 
 const BAR_W = 1.5;
 const MAX_SHOW = 300;
@@ -53,7 +61,7 @@ export function EChartsOmissionKChart({
     const n = showBars.length;
 
     if (n === 0) {
-      return '<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:12px;font-family:sans-serif">无开出记录</body></html>';
+      return `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:${TICK_COLOR};font-size:12px;font-family:sans-serif">无开出记录</body></html>`;
     }
 
     const allY: number[] = [];
@@ -65,12 +73,12 @@ export function EChartsOmissionKChart({
     const xLabels = showBars.map((b) => series[b.x].issue.slice(-3));
     const dataWithColor = showBars.map((b) => ({
       value: [b.x - showBars[0].x, b.o, b.c],
-      itemStyle: { color: b.isRed ? RED : CYAN },
+      itemStyle: { color: b.isRed ? UP : DOWN },
     }));
     // 修正 x 从 0 开始
     const dataFinal = showBars.map((b, i) => ({
       value: [i, b.o, b.c],
-      itemStyle: { color: b.isRed ? RED : CYAN },
+      itemStyle: { color: b.isRed ? UP : DOWN },
     }));
 
     const labelStep = Math.max(1, Math.floor(n / 15));
@@ -96,22 +104,22 @@ export function EChartsOmissionKChart({
 
     const optionStr = `{
       animation: false,
-      backgroundColor: '#ffffff',
+      backgroundColor: 'transparent',
       grid: { left: 36, right: 16, top: 26, bottom: 22 },
-      graphic: ${targetLabel ? `[{"type":"text","left":"center","top":4,"style":{"text":${JSON.stringify(targetLabel)},"fontSize":10,"fill":"#8a8f98"}}]` : "null"},
+      graphic: ${targetLabel ? `[{"type":"text","left":"center","top":4,"style":{"text":${JSON.stringify(targetLabel)},"fontSize":10,"fill":"${TITLE_COLOR}"}}]` : "null"},
       xAxis: {
         type: 'category',
         data: ${JSON.stringify(xAxisLabels)},
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: 'rgba(140,140,150,0.35)' } },
-        axisLabel: { fontSize: 8, color: '#8a8f98', interval: 0 }
+        axisLine: { lineStyle: { color: '${AXIS_COLOR}' } },
+        axisLabel: { fontSize: 8, color: '${TICK_COLOR}', interval: 0 }
       },
       yAxis: {
         type: 'value',
         min: ${Math.floor(yMin - range * 0.08)},
         max: ${Math.ceil(yMax + range * 0.08)},
-        splitLine: { lineStyle: { color: 'rgba(140,140,150,0.15)' } },
-        axisLabel: { fontSize: 8, color: '#8a8f98' }
+        splitLine: { lineStyle: { color: '${AXIS_COLOR}' } },
+        axisLabel: { fontSize: 8, color: '${TICK_COLOR}' }
       },
       series: [
         {

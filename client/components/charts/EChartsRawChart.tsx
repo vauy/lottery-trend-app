@@ -6,11 +6,22 @@ import React, { useMemo } from 'react';
 import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ECHARTS_SOURCE } from '@/lib/echartsSource';
+import { palette, semantic } from '@/lib/theme';
 
 type RawPoint = { issue: string; value: number };
 
-const LINE_COLOR = '#2563eb';
-const DOT_COLOR = '#e5484d';
+/** 主折线（原型 drawAmp 的主线 = accent） */
+const LINE_COLOR = palette.accent;
+/** 数值点（热） */
+const DOT_COLOR = semantic.hot;
+/** 均线：MA3 = cyan / MA5 = amber（原型）/ MA10 = red */
+const MA3_COLOR = semantic.cold;
+const MA5_COLOR = palette.amber;
+const MA10_COLOR = semantic.hot;
+/** 坐标轴线 / 网格线 */
+const AXIS_COLOR = palette.line;
+/** 坐标刻度文字 */
+const TICK_COLOR = palette.inkFaint;
 
 const MAX_SHOW = 200;
 
@@ -32,7 +43,7 @@ export function EChartsRawChart({
     const n = points.length;
 
     if (n === 0) {
-      return '<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:12px;font-family:sans-serif">暂无数据</body></html>';
+      return `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;color:${TICK_COLOR};font-size:12px;font-family:sans-serif">暂无数据</body></html>`;
     }
 
     const values = points.map((p) => p.value);
@@ -59,29 +70,29 @@ export function EChartsRawChart({
 
     const optionStr = `{
       animation: false,
-      backgroundColor: '#ffffff',
-      title: ${JSON.stringify(title ?? '')},
+      backgroundColor: 'transparent',
+      title: ${JSON.stringify({ text: title ?? '', textStyle: { color: TICK_COLOR, fontSize: 10 } })},
       grid: { left: 36, right: 16, top: ${title ? 26 : 12}, bottom: 22 },
       xAxis: {
         type: 'category',
         data: ${JSON.stringify(xLabels)},
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: 'rgba(140,140,150,0.35)' } },
-        axisLabel: { fontSize: 8, color: '#8a8f98', interval: 0 }
+        axisLine: { lineStyle: { color: '${AXIS_COLOR}' } },
+        axisLabel: { fontSize: 8, color: '${TICK_COLOR}', interval: 0 }
       },
       yAxis: {
         type: 'value',
         min: 0,
         max: ${Math.ceil(yMaxFinal * 1.1)},
-        splitLine: { lineStyle: { color: 'rgba(140,140,150,0.15)' } },
-        axisLabel: { fontSize: 8, color: '#8a8f98' }
+        splitLine: { lineStyle: { color: '${AXIS_COLOR}' } },
+        axisLabel: { fontSize: 8, color: '${TICK_COLOR}' }
       },
       series: [
         {
           name: 'MA10',
           type: 'line',
           data: ${JSON.stringify(ma10)},
-          lineStyle: { color: '#e879f9', width: 1 },
+          lineStyle: { color: '${MA10_COLOR}', width: 1 },
           symbol: 'none',
           smooth: true,
           z: 2
@@ -90,7 +101,7 @@ export function EChartsRawChart({
           name: 'MA5',
           type: 'line',
           data: ${JSON.stringify(ma5)},
-          lineStyle: { color: '#22c55e', width: 1 },
+          lineStyle: { color: '${MA5_COLOR}', width: 1 },
           symbol: 'none',
           smooth: true,
           z: 2
@@ -99,7 +110,7 @@ export function EChartsRawChart({
           name: 'MA3',
           type: 'line',
           data: ${JSON.stringify(ma3)},
-          lineStyle: { color: '#3b82f6', width: 1 },
+          lineStyle: { color: '${MA3_COLOR}', width: 1 },
           symbol: 'none',
           smooth: true,
           z: 2
@@ -108,7 +119,7 @@ export function EChartsRawChart({
           name: '值',
           type: 'line',
           data: ${JSON.stringify(dataWithX)},
-          lineStyle: { color: '${LINE_COLOR}', width: 1.5 },
+          lineStyle: { color: '${LINE_COLOR}', width: 1.6 },
           itemStyle: { color: '${DOT_COLOR}' },
           symbol: 'circle',
           symbolSize: 4,

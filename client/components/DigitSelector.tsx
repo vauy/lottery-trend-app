@@ -3,11 +3,13 @@
  */
 import { Pressable, Text, View } from 'react-native';
 import type { TemperatureStatus } from '@/lib/lottery/types';
+import { palette } from '@/lib/theme';
 
+/** 冷温热配色与原型对齐：热=红 #EF6661、温=琥珀 #F2B95A、冷=青 #4FCDCD */
 const TEMP_TEXT: Record<TemperatureStatus, string> = {
-  hot: '#ef4444',
-  warm: '#f59e0b',
-  cold: '#3b82f6',
+  hot: palette.red,
+  warm: palette.amber,
+  cold: palette.cyan,
 };
 
 export function DigitSelector({
