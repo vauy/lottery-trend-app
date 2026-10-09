@@ -69,6 +69,7 @@ export function EChartsFreqKChart({
   width = 350,
   period = 1,
   showBoll = true,
+  targetLabel,
   barWidth = 4,
   hideShadow = true,
   heightScale = 1,
@@ -78,6 +79,7 @@ export function EChartsFreqKChart({
   width?: number;
   period?: number;
   showBoll?: boolean;
+  targetLabel?: string;
   barWidth?: number;
   hideShadow?: boolean;   // 是否隐藏上下影线
   heightScale?: number;   // 高度缩放（1 = 原始，0.5 = 缩小一半）
@@ -179,7 +181,8 @@ export function EChartsFreqKChart({
     const optionStr = `{
       animation: false,
       backgroundColor: '#ffffff',
-      grid: { left: 36, right: 16, top: 10, bottom: 22 },
+      grid: { left: 36, right: 16, top: 22, bottom: 22 },
+      graphic: ${targetLabel ? `[{"type":"text","left":"center","top":4,"style":{"text":${JSON.stringify(targetLabel)},"fontSize":10,"fill":"#8a8f98"}}]` : "null"},
       xAxis: {
         type: 'category',
         data: ${JSON.stringify(xLabels)},

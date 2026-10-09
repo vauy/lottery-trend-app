@@ -35,6 +35,7 @@ export function EChartsOmissionChart({
   theoryMiss = 0,
   mode = 'both',
   historyMaxMiss,
+  targetLabel,
 }: {
   series: SeriesPoint[];
   height?: number;
@@ -42,11 +43,12 @@ export function EChartsOmissionChart({
   theoryMiss?: number;
   mode?: ChartMode;
   historyMaxMiss?: number;
+  targetLabel?: string;
 }) {
   const [rangeIdx, setRangeIdx] = useState(0);
 
   const html = useMemo(() => {
-    const MAX_SHOW = 200;
+    const MAX_SHOW = 1000;
     const trimmed = series.length > MAX_SHOW ? series.slice(-MAX_SHOW) : series;
     const n = trimmed.length;
     if (n === 0) {
@@ -166,8 +168,8 @@ export function EChartsOmissionChart({
         ]
       : [{ left: 36, right: 60, top: 26, height: '78%' }];
 
-    const secondTitle = `二阶遗漏图（遗漏范围 ${range.min}-${range.max}）`;
-    const firstTitle = `一阶遗漏图（历史最大:${maxMiss} 平均:${avgMiss.toFixed(3)} 理论:${theoryMiss.toFixed(3)} 当前:${currentMiss}）`;
+    const secondTitle = `${targetLabel ? targetLabel + '  ' : ''}二阶遗漏图（遗漏范围 ${range.min}-${range.max}）`;
+    const firstTitle = `${targetLabel ? targetLabel + '  ' : ''}一阶遗漏图（历史最大:${maxMiss} 出次:${nOpens} 平均:${avgMiss.toFixed(3)} 理论:${theoryMiss.toFixed(3)} 当前:${currentMiss}）`;
 
     const graphic: any[] = [];
     if (isBoth) {

@@ -21,7 +21,7 @@ import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { OmissionChart } from '@/components/charts/OmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
 import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
-import { buildRawSeries, buildShapeCodes, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
+import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
 import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode } from '@/lib/lottery/targets';
@@ -627,6 +627,9 @@ export default function AnalyzeScreen() {
       <Pressable onPress={() => void refresh()} disabled={refreshing} style={btnStyle(false)}>
         <Text style={txtColor(false)}>{refreshing ? '刷新中…' : '刷新'}</Text>
       </Pressable>
+    <Text style={{ fontSize: 9, color: '#888', marginLeft: 4 }} numberOfLines={1}>
+      {source} {records.length}期 / 共{allRecords.length}期
+    </Text>
     </View>
   );
 
@@ -1768,6 +1771,7 @@ export default function AnalyzeScreen() {
                         height={cellHFinal}
                         width={cellWFinal}
                         theoryMiss={tMiss}
+                        targetLabel={getTargetLabel(ct)}
                       />
                     )}
                     {m === 'omissionLine' && (
@@ -1776,6 +1780,7 @@ export default function AnalyzeScreen() {
                         height={cellHFinal}
                         width={cellWFinal}
                         theoryMiss={tMiss}
+                        targetLabel={getTargetLabel(ct)}
                         mode="level1"
                       />
                     )}
@@ -1785,6 +1790,7 @@ export default function AnalyzeScreen() {
                         height={cellHFinal}
                         width={cellWFinal}
                         theoryMiss={tMiss}
+                        targetLabel={getTargetLabel(ct)}
                         mode="level2"
                       />
                     )}
@@ -1824,6 +1830,7 @@ export default function AnalyzeScreen() {
                       height={Math.max(140, height - TOP_BAR_H)}
                       width={typeof width === 'number' ? width - 24 : 334}
                       theoryMiss={theoryMiss}
+                      targetLabel={getTargetLabel(target)}
                       historyMaxMiss={historyMaxMiss}
                       mode="level1"
                     />
@@ -1834,6 +1841,7 @@ export default function AnalyzeScreen() {
                       height={Math.max(140, height - TOP_BAR_H)}
                       width={typeof width === 'number' ? width - 24 : 334}
                       theoryMiss={theoryMiss}
+                      targetLabel={getTargetLabel(target)}
                       historyMaxMiss={historyMaxMiss}
                       mode="level2"
                     />
@@ -1844,6 +1852,7 @@ export default function AnalyzeScreen() {
                         height={Math.max(140, height - TOP_BAR_H)}
                         width={typeof width === 'number' ? width - 24 : 334}
                         theoryMiss={theoryMiss}
+                        targetLabel={getTargetLabel(target)}
                       />
                   )}
                 </View>

@@ -29,11 +29,13 @@ export function EChartsOmissionKChart({
   height = 300,
   width = 350,
   theoryMiss = 0,
+  targetLabel,
 }: {
   series: TargetPoint[];
   height?: number;
   width?: number;
   theoryMiss?: number;
+  targetLabel?: string;
 }) {
   const html = useMemo(() => {
     const bars: KBar[] = [];
@@ -95,7 +97,8 @@ export function EChartsOmissionKChart({
     const optionStr = `{
       animation: false,
       backgroundColor: '#ffffff',
-      grid: { left: 36, right: 16, top: 14, bottom: 22 },
+      grid: { left: 36, right: 16, top: 26, bottom: 22 },
+      graphic: ${targetLabel ? `[{"type":"text","left":"center","top":4,"style":{"text":${JSON.stringify(targetLabel)},"fontSize":10,"fill":"#8a8f98"}}]` : "null"},
       xAxis: {
         type: 'category',
         data: ${JSON.stringify(xAxisLabels)},

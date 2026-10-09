@@ -25,11 +25,13 @@ export function SkiaRawChart({
   height = 300,
   width = 350,
   title,
+  targetLabel,
 }: {
   data: RawPoint[];
   height?: number;
   width?: number;
   title?: string;
+  targetLabel?: string;
 }) {
   const points = data.length > MAX_SHOW ? data.slice(-MAX_SHOW) : data;
   const n = points.length;
