@@ -20,7 +20,7 @@ import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { OmissionChart } from '@/components/charts/OmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
 import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
-import { buildRawSeries, type Kl8Play } from '@/lib/lottery/targets';
+import { buildRawSeries, buildKl8CategorySeries, type Kl8Category } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
@@ -29,7 +29,7 @@ type ChartMode = 'freq' | 'omissionK' | 'omissionLine' | 'omissionLine2';
 type TabId =
   | 'common' | 'dan' | 'dantuo' | 'pos' | 'multi'
   | 'heji' | 'amp' | 'random1' | 'random2' | 'group'
-  | 'combo' | 'fushi' | 'kl8seq' | 'kl8dt';
+  | 'combo' | 'category';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'common', label: '常用' },
@@ -43,9 +43,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'random2', label: '随机交并' },
   { id: 'group', label: '分组胆' },
   { id: 'combo', label: '组合' },
-  { id: 'fushi', label: '复式' },
-  { id: 'kl8seq', label: '连号' },
-  { id: 'kl8dt', label: '胆拖' },
+  { id: 'category', label: '分类' },
 ];
 
 const POS_OPTIONS: Position[] = ['any', 'bai', 'shi', 'ge'];
@@ -188,24 +186,12 @@ export default function AnalyzeScreen() {
 
   const [type, setType] = useState('draw');
   const [commonDigit, setCommonDigit] = useState(5);
+  const [kl8Digit, setKl8Digit] = useState(1);
   const [kl8ComboCodes, setKl8ComboCodes] = useState<number[]>([]);
   const [kl8MatchMode, setKl8MatchMode] = useState<'all' | 'any' | 'exact'>('all');
   const [kl8MatchCount, setKl8MatchCount] = useState(2);
-  const [kl8FushiCodes, setKl8FushiCodes] = useState<number[]>([]);
-  const [kl8FushiPlaySize, setKl8FushiPlaySize] = useState(10);
-  const [kl8CommonMode, setKl8CommonMode] = useState<'digit' | 'tail' | 'road' | 'zone4' | 'zone8'>('digit');
-  const [kl8CommonValue, setKl8CommonValue] = useState(0);
-  const [kl8CommonMatchCount, setKl8CommonMatchCount] = useState(2);
-  const [kl8SeqType, setKl8SeqType] = useState<'connum'|'odd'|'even'|'prime'|'comp'|'road0'|'road1'|'road2'>('connum');
-  const [kl8SeqLen, setKl8SeqLen] = useState(4);
-  const [kl8SeqIndex, setKl8SeqIndex] = useState(0);
-  const [kl8SeqMenuOpen, setKl8SeqMenuOpen] = useState(false);
-  const [kl8DtDan, setKl8DtDan] = useState<number[]>([]);
-  const [kl8DtTuo, setKl8DtTuo] = useState<number[]>([]);
-  const [kl8DtDanCounts, setKl8DtDanCounts] = useState<number[]>([1, 2, 3]);
-  const [kl8DtTuoCounts, setKl8DtTuoCounts] = useState<number[]>([2, 3]);
-  const [kl8DtDanMenuOpen, setKl8DtDanMenuOpen] = useState(false);
-  const [kl8DtTuoMenuOpen, setKl8DtTuoMenuOpen] = useState(false);
+  const [kl8Category, setKl8Category] = useState<Kl8Category>('tail');
+  const [kl8CategoryValue, setKl8CategoryValue] = useState(0);
   const [commonMode, setCommonMode] = useState<'digit' | 'front2' | 'back2'>('digit');
   const [commonFront2, setCommonFront2] = useState(9);
   const [commonBack2, setCommonBack2] = useState(9);
@@ -270,69 +256,14 @@ export default function AnalyzeScreen() {
     if (hejiValue > sumMax) setHejiValue(Math.floor(sumMax / 2));
   }, [gameId]);
 
-  const kl8SeqPool = useMemo(() => {
-    const isPrimeNum = (n: number) => n === 2 || n === 3 || n === 5 || n === 7 || n === 11 || n === 13
-      || n === 17 || n === 19 || n === 23 || n === 29 || n === 31 || n === 37
-      || n === 41 || n === 43 || n === 47 || n === 53 || n === 59 || n === 61
-      || n === 67 || n === 71 || n === 73 || n === 79;
-    const pool: number[] = [];
-    if (kl8SeqType === 'connum') { for (let i = 1; i <= 80; i++) pool.push(i); }
-    else if (kl8SeqType === 'odd') { for (let i = 1; i <= 79; i += 2) pool.push(i); }
-    else if (kl8SeqType === 'even') { for (let i = 2; i <= 80; i += 2) pool.push(i); }
-    else if (kl8SeqType === 'prime') { for (let i = 2; i <= 80; i++) if (isPrimeNum(i)) pool.push(i); }
-    else if (kl8SeqType === 'comp') { for (let i = 4; i <= 80; i++) if (!isPrimeNum(i)) pool.push(i); }
-    else if (kl8SeqType === 'road0') { for (let i = 3; i <= 80; i += 3) pool.push(i); }
-    else if (kl8SeqType === 'road1') { for (let i = 1; i <= 80; i += 3) pool.push(i); }
-    else if (kl8SeqType === 'road2') { for (let i = 2; i <= 80; i += 3) pool.push(i); }
-    return pool;
-  }, [kl8SeqType]);
-
-  const kl8SeqOptions = useMemo(() => {
-    const opts: number[][] = [];
-    for (let i = 0; i + kl8SeqLen <= kl8SeqPool.length; i += 1) {
-      opts.push(kl8SeqPool.slice(i, i + kl8SeqLen));
-    }
-    return opts;
-  }, [kl8SeqPool, kl8SeqLen]);
-
-  const kl8SeqCodes = kl8SeqOptions[kl8SeqIndex] ?? [];
-
   const target: Target = useMemo(() => {
     if (externalCodes && externalCodes.size > 0 && tab === 'dan')
       return { kind: 'set', codes: externalCodes };
-    if (tab === 'fushi') {
-      return { kind: 'kl8Fushi', codes: [...kl8FushiCodes].sort((a, b) => a - b), playSize: kl8FushiPlaySize };
-    }
-    if (tab === 'kl8dt') {
-      return {
-        kind: 'kl8Dantuo',
-        dan: [...kl8DtDan].sort((a, b) => a - b),
-        tuo: [...kl8DtTuo].sort((a, b) => a - b),
-        danCounts: [...kl8DtDanCounts].sort((a, b) => a - b),
-        tuoCounts: [...kl8DtTuoCounts].sort((a, b) => a - b),
-      };
-    }
-    if (tab === 'kl8seq') {
-      return { kind: 'kl8Combo', codes: kl8SeqCodes, matchMode: 'all' };
-    }
     if (tab === 'combo') {
       return { kind: 'kl8Combo', codes: [...kl8ComboCodes].sort((a, b) => a - b), matchMode: kl8MatchMode, matchCount: kl8MatchCount };
     }
     if (tab === 'common') {
-      if (gameId === 'kl8') {
-        if (kl8CommonMode === 'digit') return { kind: 'digit', digit: kl8CommonValue, pos: 'any' };
-        // 分类模式：映射成号集合，按"中N个"分析
-        const codes: number[] = [];
-        for (let n = 1; n <= 80; n += 1) {
-          let match = false;
-          if (kl8CommonMode === 'tail') match = n % 10 === kl8CommonValue;
-          else if (kl8CommonMode === 'road') match = n % 3 === kl8CommonValue;
-          else if (kl8CommonMode === 'zone4') match = Math.floor((n - 1) / 20) === kl8CommonValue;
-          else if (kl8CommonMode === 'zone8') match = Math.floor((n - 1) / 10) === kl8CommonValue;
-          if (match) codes.push(n);
-        }
-        return { kind: 'kl8Combo', codes, matchMode: 'exact', matchCount: kl8CommonMatchCount };
-      }
+      if (gameId === 'kl8') return { kind: 'digit', digit: kl8Digit, pos: 'any' };
       if (commonMode === 'digit') return { kind: 'digit', digit: commonDigit, pos: 'any' };
       if (commonMode === 'front2') return { kind: 'calcAttr', calcKey: 'front2Sum', value: commonFront2 };
       return { kind: 'calcAttr', calcKey: 'back2Sum', value: commonBack2 };
@@ -376,7 +307,7 @@ export default function AnalyzeScreen() {
     if (tab === 'heji') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     if (tab === 'amp') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     return { kind: 'set', codes: new Set() };
-  }, [tab, type, externalCodes, commonDigit, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
+  }, [tab, type, externalCodes, commonDigit, kl8Digit, kl8ComboCodes, kl8MatchMode, kl8MatchCount, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
     bai, shi, ge, multiMode, noposNums, hejiKey, hejiValue]);
 
   const codesCount = useMemo(() => {
@@ -393,10 +324,14 @@ export default function AnalyzeScreen() {
 
   // 振幅等原始值序列
   const rawData = useMemo(() => {
+    if (tab === 'category' && gameId === 'kl8') {
+      const sliced = records.length > 80 ? records.slice(-80) : records;
+      return buildKl8CategorySeries(sliced, kl8Category, kl8CategoryValue);
+    }
     if (tab !== 'amp') return null;
     const sliced = records.length > 500 ? records.slice(-500) : records;
     return buildRawSeries(sliced, ampKey as any);
-  }, [records, tab, ampKey]);
+  }, [records, tab, ampKey, gameId, kl8Category, kl8CategoryValue]);
 
   const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD, samplingMode), [target, V, DD, samplingMode]);
 
@@ -479,10 +414,7 @@ export default function AnalyzeScreen() {
         </Text>
         <Text style={{ fontSize: 9, color: '#fff' }}>▼</Text>
       </Pressable>
-      {(gameId === 'kl8'
-        ? TABS.filter((t) => ['common', 'combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id))
-        : TABS.filter((t) => !['combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id))
-      ).map((t) => (
+      {(gameId === 'kl8' ? TABS.filter((t) => t.id === 'common' || t.id === 'combo' || t.id === 'category') : TABS).map((t) => (
         <Pressable key={t.id} onPress={() => {
                     setTab(t.id);
                     setCompareTargets(null);
@@ -561,218 +493,6 @@ export default function AnalyzeScreen() {
       {extra}
     </View>
   );
-
-  const renderKl8Dt = () => {
-    const rows: number[][] = [];
-    for (let r = 0; r < 2; r += 1) {
-      const row: number[] = [];
-      for (let c = 1; c <= 40; c += 1) row.push(r * 40 + c);
-      rows.push(row);
-    }
-    const toggleDan = (v: number) => {
-      setKl8DtDan((prev) => {
-        if (prev.includes(v)) return prev.filter((x) => x !== v);
-        if (prev.length >= 9) return prev;
-        setKl8DtTuo((t) => t.filter((x) => x !== v));
-        return [...prev, v];
-      });
-    };
-    const toggleTuo = (v: number) => {
-      setKl8DtTuo((prev) => {
-        if (prev.includes(v)) return prev.filter((x) => x !== v);
-        return [...prev, v];
-      });
-    };
-    const toggleTuoCount = (n: number) => {
-      setKl8DtTuoCounts((prev) => prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]);
-    };
-    const renderGrid = (active: number[], onToggle: (v: number) => void, disabled: number[] = []) => (
-      <View>
-        {rows.map((row, ri) => (
-          <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-            <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
-              {String(row[0]).padStart(2, '0')}-
-            </Text>
-            {row.map((v) => {
-              const isActive = active.includes(v);
-              const isDisabled = disabled.includes(v);
-              return (
-                <Pressable key={v}
-                  onPress={() => { if (!isDisabled) onToggle(v); }}
-                  style={{ flex: 1, height: 22, borderRadius: 3, backgroundColor: isActive ? '#2563eb' : (isDisabled ? '#e5e7eb' : '#f3f4f6'), justifyContent: 'center', alignItems: 'center', opacity: isDisabled ? 0.4 : 1 }}>
-                  <Text style={{ fontSize: 9, color: isActive ? '#fff' : (isDisabled ? '#9ca3af' : '#111827'), fontWeight: isActive ? '700' : '400' }}>
-                    {String(v).padStart(2, '0')}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ))}
-      </View>
-    );
-    return (
-      <>
-        {/* 胆行 */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 2 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>胆 码</Text>
-          <Pressable
-            onPress={() => setKl8DtDanMenuOpen(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 26, borderRadius: 4, backgroundColor: '#2563eb' }}
-          >
-            <Text style={{ fontSize: 12, color: '#fff', fontWeight: '700' }}>
-              {kl8DtDan.length > 0 ? kl8DtDan.map((n) => String(n).padStart(2, '0')).join(' ') : '点此选胆'}
-            </Text>
-            <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
-          </Pressable>
-          <Text style={{ fontSize: 9, color: '#888' }}>中</Text>
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
-            const active = kl8DtDanCounts.includes(n);
-            return (
-              <Pressable key={n}
-                onPress={() => setKl8DtDanCounts((prev) => prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n])}
-                style={btnStyle(active)}>
-                <Text style={txtColor(active)}>{n}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* 拖行 */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 2 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>拖 码</Text>
-          <Pressable
-            onPress={() => setKl8DtTuoMenuOpen(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 26, borderRadius: 4, backgroundColor: '#2563eb' }}
-          >
-            <Text style={{ fontSize: 12, color: '#fff', fontWeight: '700' }}>
-              {kl8DtTuo.length > 0 ? kl8DtTuo.map((n) => String(n).padStart(2, '0')).join(' ') : '点此选拖'}
-            </Text>
-            <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
-          </Pressable>
-          <Text style={{ fontSize: 9, color: '#888' }}>中</Text>
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((n) => {
-            const active = kl8DtTuoCounts.includes(n);
-            return (
-              <Pressable key={n}
-                onPress={() => toggleTuoCount(n)}
-                style={btnStyle(active)}>
-                <Text style={txtColor(active)}>{n}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* 胆码网格弹窗 */}
-        <Modal visible={kl8DtDanMenuOpen} transparent animationType="fade" onRequestClose={() => setKl8DtDanMenuOpen(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10, width: '96%' }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#111827', marginBottom: 6, textAlign: 'center' }}>
-                选胆码（最多 9 个，已选 {kl8DtDan.length}）
-              </Text>
-              {renderGrid(kl8DtDan, toggleDan)}
-              <Pressable onPress={() => setKl8DtDanMenuOpen(false)} style={{ marginTop: 8, height: 32, borderRadius: 6, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: '#fff', fontWeight: '700' }}>确定</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
-
-        {/* 拖码网格弹窗 */}
-        <Modal visible={kl8DtTuoMenuOpen} transparent animationType="fade" onRequestClose={() => setKl8DtTuoMenuOpen(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 10, width: '96%' }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#111827', marginBottom: 6, textAlign: 'center' }}>
-                选拖码（已选 {kl8DtTuo.length}）
-              </Text>
-              {renderGrid(kl8DtTuo, toggleTuo, kl8DtDan)}
-              <Pressable onPress={() => setKl8DtTuoMenuOpen(false)} style={{ marginTop: 8, height: 32, borderRadius: 6, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: '#fff', fontWeight: '700' }}>确定</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
-      </>
-    );
-  };
-
-  const renderKl8Seq = () => {
-    const types: { id: typeof kl8SeqType; label: string }[] = [
-      { id: 'connum', label: '连' },
-      { id: 'odd',    label: '奇' },
-      { id: 'even',   label: '偶' },
-      { id: 'prime',  label: '质' },
-      { id: 'comp',   label: '合' },
-      { id: 'road0',  label: '0路' },
-      { id: 'road1',  label: '1路' },
-      { id: 'road2',  label: '2路' },
-    ];
-    return (
-      <>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>类 型</Text>
-          {types.map((t) => (
-            <Pressable key={t.id}
-              onPress={() => { setKl8SeqType(t.id); setKl8SeqIndex(0); }}
-              style={btnStyle(kl8SeqType === t.id)}>
-              <Text style={txtColor(kl8SeqType === t.id)}>{t.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>长 度</Text>
-          {[2, 3, 4, 5, 6, 7, 8].map((n) => (
-            <Pressable key={n}
-              onPress={() => { setKl8SeqLen(n); setKl8SeqIndex(0); }}
-              style={btnStyle(kl8SeqLen === n)}>
-              <Text style={txtColor(kl8SeqLen === n)}>{n}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>已 选</Text>
-          <Pressable
-            onPress={() => setKl8SeqMenuOpen(true)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 26, borderRadius: 4, backgroundColor: '#2563eb' }}
-          >
-            <Text style={{ fontSize: 12, color: '#fff', fontWeight: '700' }}>
-              {kl8SeqCodes.map((n) => String(n).padStart(2, '0')).join(' ')}
-            </Text>
-            <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
-          </Pressable>
-          <Text style={{ fontSize: 9, color: '#888' }}>
-            （共 {kl8SeqOptions.length} 组 · 第 {kl8SeqIndex + 1} 组）
-          </Text>
-        </View>
-
-        <Modal visible={kl8SeqMenuOpen} transparent animationType="fade" onRequestClose={() => setKl8SeqMenuOpen(false)}>
-          <Pressable
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}
-            onPress={() => setKl8SeqMenuOpen(false)}
-          >
-            <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 8, width: 240, maxHeight: 360 }}>
-              <Text style={{ fontSize: 11, color: '#888', marginBottom: 6, textAlign: 'center' }}>选择组合</Text>
-              <ScrollView>
-                {kl8SeqOptions.map((opt, i) => {
-                  const active = i === kl8SeqIndex;
-                  return (
-                    <Pressable
-                      key={i}
-                      onPress={() => { setKl8SeqIndex(i); setKl8SeqMenuOpen(false); }}
-                      style={{ paddingVertical: 7, paddingHorizontal: 10, borderRadius: 4, backgroundColor: active ? '#2563eb' : 'transparent' }}
-                    >
-                      <Text style={{ fontSize: 12, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
-                        {opt.map((n) => String(n).padStart(2, '0')).join(' ')}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          </Pressable>
-        </Modal>
-      </>
-    );
-  };
 
   const renderCombo = () => {
     const rows: number[][] = [];
@@ -901,105 +621,42 @@ export default function AnalyzeScreen() {
       </View>
     );
 
-    // KL8 专用：模式行 + 值行
+    // KL8 专用：2 行 × 40 列号码网格（01-80）
     if (gameId === 'kl8') {
-      const modes: { id: typeof kl8CommonMode; label: string }[] = [
-        { id: 'digit', label: '数字' },
-        { id: 'tail', label: '尾号' },
-        { id: 'road', label: '012路' },
-        { id: 'zone4', label: '4区' },
-        { id: 'zone8', label: '8区' },
-      ];
-      const isDigit = kl8CommonMode === 'digit';
-      const valueCount = kl8CommonMode === 'digit' ? 80
-        : kl8CommonMode === 'tail' ? 10
-        : kl8CommonMode === 'road' ? 3
-        : kl8CommonMode === 'zone4' ? 4
-        : 8;
-      const valueLabel = (v: number): string => {
-        if (kl8CommonMode === 'digit') return String(v).padStart(2, '0');
-        if (kl8CommonMode === 'tail') return `尾${v}`;
-        if (kl8CommonMode === 'road') return `${v}路`;
-        if (kl8CommonMode === 'zone4') return ['01-20', '21-40', '41-60', '61-80'][v] ?? String(v);
-        return `${String(v * 10 + 1).padStart(2, '0')}-${String(v * 10 + 10).padStart(2, '0')}`;
-      };
-      const valueStart = isDigit ? 1 : 0;
-
+      const rows: number[][] = [];
+      for (let r = 0; r < 2; r += 1) {
+        const row: number[] = [];
+        for (let c = 1; c <= 40; c += 1) row.push(r * 40 + c);
+        rows.push(row);
+      }
       return (
-        <>
-          {/* 模式行 */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-            <Text style={{ fontSize: 9, color: '#888', width: 24 }}>模 式</Text>
-            {modes.map((m) => (
-              <Pressable key={m.id}
-                onPress={() => { setKl8CommonMode(m.id); setKl8CommonValue(m.id === 'digit' ? 1 : 0); setKl8CommonMatchCount(2); }}
-                style={btnStyle(kl8CommonMode === m.id)}>
-                <Text style={txtColor(kl8CommonMode === m.id)}>{m.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {/* 号码网格（digit 模式 2×40）*/}
-          {isDigit && (
-            (() => {
-              const rows: number[][] = [];
-              for (let r = 0; r < 2; r += 1) {
-                const row: number[] = [];
-                for (let c = 1; c <= 40; c += 1) row.push(r * 40 + c);
-                rows.push(row);
-              }
-              return (
-                <View style={{ marginBottom: 3 }}>
-                  {rows.map((row, ri) => (
-                    <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-                      <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
-                        {String(row[0]).padStart(2, '0')}-
-                      </Text>
-                      {row.map((v) => {
-                        const active = kl8CommonValue === v;
-                        return (
-                          <Pressable key={v}
-                            onPress={() => { setExternalCodes(null); setKl8CommonValue(v); }}
-                            style={{ flex: 1, height: 22, borderRadius: 3, backgroundColor: active ? '#2563eb' : '#f3f4f6', justifyContent: 'center', alignItems: 'center' }}>
-                            <Text style={{ fontSize: 9, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
-                              {String(v).padStart(2, '0')}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  ))}
-                </View>
-              );
-            })()
-          )}
-
-          {/* 值行（非 digit 模式）*/}
-          {!isDigit && (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-                <Text style={{ fontSize: 9, color: '#888', width: 24 }}>值</Text>
-                {Array.from({ length: valueCount }, (_, i) => i + valueStart).map((v) => (
-                  <Pressable key={v}
-                    onPress={() => setKl8CommonValue(v)}
-                    style={btnStyle(kl8CommonValue === v)}>
-                    <Text style={txtColor(kl8CommonValue === v)}>{valueLabel(v)}</Text>
+        <View style={{ marginBottom: 3 }}>
+          {rows.map((row, ri) => (
+            <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
+              <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
+                {String(row[0]).padStart(2, '0')}-
+              </Text>
+              {row.map((v) => {
+                const active = kl8Digit === v;
+                return (
+                  <Pressable
+                    key={v}
+                    onPress={() => { setExternalCodes(null); setKl8Digit(v); }}
+                    style={{
+                      flex: 1, height: 22, borderRadius: 3,
+                      backgroundColor: active ? '#2563eb' : '#f3f4f6',
+                      justifyContent: 'center', alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 9, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
+                      {String(v).padStart(2, '0')}
+                    </Text>
                   </Pressable>
-                ))}
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-                <Text style={{ fontSize: 9, color: '#888', width: 24 }}>中N个</Text>
-                {[0, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-                  <Pressable key={n}
-                    onPress={() => setKl8CommonMatchCount(n)}
-                    style={btnStyle(kl8CommonMatchCount === n)}>
-                    <Text style={txtColor(kl8CommonMatchCount === n)}>{n}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </>
-          )}
-        </>
+                );
+              })}
+            </View>
+          ))}
+        </View>
       );
     }
 
@@ -1265,58 +922,47 @@ export default function AnalyzeScreen() {
     );
   };
 
-  const renderFushi = () => {
-    const rows: number[][] = [];
-    for (let r = 0; r < 2; r += 1) {
-      const row: number[] = [];
-      for (let c = 1; c <= 40; c += 1) row.push(r * 40 + c);
-      rows.push(row);
-    }
-    const toggleFushi = (v: number) => {
-      setExternalCodes(null);
-      setKl8FushiCodes((prev) => prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]);
-    };
+  const renderCategory = () => {
+    const categoryOptions: { id: Kl8Category; label: string }[] = [
+      { id: 'tail', label: '尾号' },
+      { id: 'road', label: '012路' },
+      { id: 'zone4', label: '4区' },
+      { id: 'zone8', label: '8区' },
+    ];
+    const valueCount = kl8Category === 'tail' ? 10 : kl8Category === 'road' ? 3 : kl8Category === 'zone4' ? 4 : 8;
+    const valueLabels: string[] = kl8Category === 'tail'
+      ? Array.from({ length: 10 }, (_, i) => `尾${i}`)
+      : kl8Category === 'road'
+      ? ['0路', '1路', '2路']
+      : kl8Category === 'zone4'
+      ? ['01-20', '21-40', '41-60', '61-80']
+      : Array.from({ length: 8 }, (_, i) => `${String(i * 10 + 1).padStart(2, '0')}-${String(i * 10 + 10).padStart(2, '0')}`);
+
     return (
       <>
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>玩 法</Text>
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-            <Pressable key={n}
-              onPress={() => setKl8FushiPlaySize(n)}
-              style={btnStyle(kl8FushiPlaySize === n)}>
-              <Text style={txtColor(kl8FushiPlaySize === n)}>选{n}</Text>
+          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>分 类</Text>
+          {categoryOptions.map((o) => (
+            <Pressable
+              key={o.id}
+              onPress={() => { setKl8Category(o.id); setKl8CategoryValue(0); }}
+              style={btnStyle(kl8Category === o.id)}
+            >
+              <Text style={txtColor(kl8Category === o.id)}>{o.label}</Text>
             </Pressable>
           ))}
         </View>
-        <View style={{ marginBottom: 3 }}>
-          {rows.map((row, ri) => (
-            <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-              <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
-                {String(row[0]).padStart(2, '0')}-
-              </Text>
-              {row.map((v) => {
-                const active = kl8FushiCodes.includes(v);
-                return (
-                  <Pressable key={v} onPress={() => toggleFushi(v)}
-                    style={{ flex: 1, height: 22, borderRadius: 3, backgroundColor: active ? '#2563eb' : '#f3f4f6', justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 9, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
-                      {String(v).padStart(2, '0')}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
+          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>值</Text>
+          {Array.from({ length: valueCount }, (_, i) => i).map((v) => (
+            <Pressable
+              key={v}
+              onPress={() => setKl8CategoryValue(v)}
+              style={btnStyle(kl8CategoryValue === v)}
+            >
+              <Text style={txtColor(kl8CategoryValue === v)}>{valueLabels[v]}</Text>
+            </Pressable>
           ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 10, color: '#888' }}>
-            已选 {kl8FushiCodes.length} 个 · 命中 ≥{kl8FushiPlaySize} 个算中
-          </Text>
-          <View style={{ flex: 1 }} />
-          <Pressable onPress={() => setKl8FushiCodes([])}
-            style={{ paddingHorizontal: 10, height: 22, borderRadius: 4, backgroundColor: '#f3f4f6' }}>
-            <Text style={{ fontSize: 11, color: '#111827' }}>清空</Text>
-          </Pressable>
         </View>
       </>
     );
@@ -1398,8 +1044,6 @@ export default function AnalyzeScreen() {
           <>
             {renderTabBar()}
             {tab === 'dan' && renderTypeRow()}
-            {tab === 'kl8dt' && renderKl8Dt()}
-            {tab === 'kl8seq' && renderKl8Seq()}
             {tab === 'combo' && renderCombo()}
             {tab === 'common' && renderCommon()}
             {tab === 'dan' && renderDan()}
@@ -1408,7 +1052,7 @@ export default function AnalyzeScreen() {
             {tab === 'multi' && renderMulti()}
             {tab === 'heji' && renderHeji()}
         {tab === 'amp' && renderAmp()}
-            {tab === 'fushi' && renderFushi()}
+            {tab === 'category' && renderCategory()}
             {tab === 'random1' && renderPlaceholder('组内随机')}
             {tab === 'random2' && renderPlaceholder('随机交并')}
             {tab === 'group' && renderPlaceholder('分组胆')}
@@ -1522,14 +1166,18 @@ export default function AnalyzeScreen() {
           )}
           <View style={{ flex: 1, position: 'relative' }}>
           {/* 振幅/分类 专用图 */}
-          {tab === 'amp' && (
+          {(tab === 'amp' || tab === 'category') && (
             <View style={{ backgroundColor: '#fff', borderRadius: 4, borderWidth: 1, borderColor: '#e5e7eb', padding: 2, marginBottom: 4, flex: 1 }}>
               {rawData && (
               <SkiaRawChart
                 data={rawData}
                 height={Math.max(200, height - TOP_BAR_H - 8)}
                 width={typeof width === 'number' ? width - 24 : 334}
-                title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                title={
+                  tab === 'amp'
+                    ? `${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`
+                    : `快乐8 ${{ tail: '尾号', road: '012路', zone4: '4区', zone8: '8区' }[kl8Category]} 走势`
+                }
               />
               )}
             </View>

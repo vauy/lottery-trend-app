@@ -20,7 +20,7 @@ import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { OmissionChart } from '@/components/charts/OmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
 import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
-import { buildRawSeries, type Kl8Play } from '@/lib/lottery/targets';
+import { buildRawSeries, buildKl8CategorySeries, type Kl8Category } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
@@ -29,7 +29,7 @@ type ChartMode = 'freq' | 'omissionK' | 'omissionLine' | 'omissionLine2';
 type TabId =
   | 'common' | 'dan' | 'dantuo' | 'pos' | 'multi'
   | 'heji' | 'amp' | 'random1' | 'random2' | 'group'
-  | 'combo' | 'fushi' | 'kl8seq' | 'kl8dt';
+  | 'combo' | 'category' | 'kl8seq' | 'kl8dt';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'common', label: '常用' },
@@ -43,7 +43,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'random2', label: '随机交并' },
   { id: 'group', label: '分组胆' },
   { id: 'combo', label: '组合' },
-  { id: 'fushi', label: '复式' },
+  { id: 'category', label: '分类' },
   { id: 'kl8seq', label: '连号' },
   { id: 'kl8dt', label: '胆拖' },
 ];
@@ -191,8 +191,8 @@ export default function AnalyzeScreen() {
   const [kl8ComboCodes, setKl8ComboCodes] = useState<number[]>([]);
   const [kl8MatchMode, setKl8MatchMode] = useState<'all' | 'any' | 'exact'>('all');
   const [kl8MatchCount, setKl8MatchCount] = useState(2);
-  const [kl8FushiCodes, setKl8FushiCodes] = useState<number[]>([]);
-  const [kl8FushiPlaySize, setKl8FushiPlaySize] = useState(10);
+  const [kl8Category, setKl8Category] = useState<Kl8Category>('tail');
+  const [kl8CategoryValue, setKl8CategoryValue] = useState(0);
   const [kl8CommonMode, setKl8CommonMode] = useState<'digit' | 'tail' | 'road' | 'zone4' | 'zone8'>('digit');
   const [kl8CommonValue, setKl8CommonValue] = useState(0);
   const [kl8CommonMatchCount, setKl8CommonMatchCount] = useState(2);
@@ -202,7 +202,8 @@ export default function AnalyzeScreen() {
   const [kl8SeqMenuOpen, setKl8SeqMenuOpen] = useState(false);
   const [kl8DtDan, setKl8DtDan] = useState<number[]>([]);
   const [kl8DtTuo, setKl8DtTuo] = useState<number[]>([]);
-  const [kl8DtDanCounts, setKl8DtDanCounts] = useState<number[]>([1, 2, 3]);
+  const [kl8DtDanMode, setKl8DtDanMode] = useState<'all' | 'count'>('all');
+  const [kl8DtDanCount, setKl8DtDanCount] = useState(2);
   const [kl8DtTuoCounts, setKl8DtTuoCounts] = useState<number[]>([2, 3]);
   const [kl8DtDanMenuOpen, setKl8DtDanMenuOpen] = useState(false);
   const [kl8DtTuoMenuOpen, setKl8DtTuoMenuOpen] = useState(false);
@@ -300,15 +301,13 @@ export default function AnalyzeScreen() {
   const target: Target = useMemo(() => {
     if (externalCodes && externalCodes.size > 0 && tab === 'dan')
       return { kind: 'set', codes: externalCodes };
-    if (tab === 'fushi') {
-      return { kind: 'kl8Fushi', codes: [...kl8FushiCodes].sort((a, b) => a - b), playSize: kl8FushiPlaySize };
-    }
     if (tab === 'kl8dt') {
       return {
         kind: 'kl8Dantuo',
         dan: [...kl8DtDan].sort((a, b) => a - b),
         tuo: [...kl8DtTuo].sort((a, b) => a - b),
-        danCounts: [...kl8DtDanCounts].sort((a, b) => a - b),
+        danAll: kl8DtDanMode === 'all',
+        danCount: kl8DtDanCount,
         tuoCounts: [...kl8DtTuoCounts].sort((a, b) => a - b),
       };
     }
@@ -376,7 +375,7 @@ export default function AnalyzeScreen() {
     if (tab === 'heji') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     if (tab === 'amp') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     return { kind: 'set', codes: new Set() };
-  }, [tab, type, externalCodes, commonDigit, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
+  }, [tab, type, externalCodes, commonDigit, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanMode, kl8DtDanCount, kl8DtTuoCounts, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
     bai, shi, ge, multiMode, noposNums, hejiKey, hejiValue]);
 
   const codesCount = useMemo(() => {
@@ -393,10 +392,14 @@ export default function AnalyzeScreen() {
 
   // 振幅等原始值序列
   const rawData = useMemo(() => {
+    if (tab === 'category' && gameId === 'kl8') {
+      const sliced = records.length > 80 ? records.slice(-80) : records;
+      return buildKl8CategorySeries(sliced, kl8Category, kl8CategoryValue);
+    }
     if (tab !== 'amp') return null;
     const sliced = records.length > 500 ? records.slice(-500) : records;
     return buildRawSeries(sliced, ampKey as any);
-  }, [records, tab, ampKey]);
+  }, [records, tab, ampKey, gameId, kl8Category, kl8CategoryValue]);
 
   const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD, samplingMode), [target, V, DD, samplingMode]);
 
@@ -480,8 +483,8 @@ export default function AnalyzeScreen() {
         <Text style={{ fontSize: 9, color: '#fff' }}>▼</Text>
       </Pressable>
       {(gameId === 'kl8'
-        ? TABS.filter((t) => ['common', 'combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id))
-        : TABS.filter((t) => !['combo', 'fushi', 'kl8seq', 'kl8dt'].includes(t.id))
+        ? TABS.filter((t) => ['common', 'combo', 'category', 'kl8seq', 'kl8dt'].includes(t.id))
+        : TABS.filter((t) => !['combo', 'category', 'kl8seq', 'kl8dt'].includes(t.id))
       ).map((t) => (
         <Pressable key={t.id} onPress={() => {
                     setTab(t.id);
@@ -625,11 +628,17 @@ export default function AnalyzeScreen() {
             <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
           </Pressable>
           <Text style={{ fontSize: 9, color: '#888' }}>中</Text>
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
-            const active = kl8DtDanCounts.includes(n);
+          <Pressable
+            onPress={() => setKl8DtDanMode('all')}
+            style={btnStyle(kl8DtDanMode === 'all')}
+          >
+            <Text style={txtColor(kl8DtDanMode === 'all')}>全中</Text>
+          </Pressable>
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
+            const active = kl8DtDanMode === 'count' && kl8DtDanCount === n;
             return (
               <Pressable key={n}
-                onPress={() => setKl8DtDanCounts((prev) => prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n])}
+                onPress={() => { setKl8DtDanMode('count'); setKl8DtDanCount(n); }}
                 style={btnStyle(active)}>
                 <Text style={txtColor(active)}>{n}</Text>
               </Pressable>
@@ -650,7 +659,7 @@ export default function AnalyzeScreen() {
             <Text style={{ fontSize: 10, color: '#fff' }}>▼</Text>
           </Pressable>
           <Text style={{ fontSize: 9, color: '#888' }}>中</Text>
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((n) => {
+          {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((n) => {
             const active = kl8DtTuoCounts.includes(n);
             return (
               <Pressable key={n}
@@ -1265,58 +1274,47 @@ export default function AnalyzeScreen() {
     );
   };
 
-  const renderFushi = () => {
-    const rows: number[][] = [];
-    for (let r = 0; r < 2; r += 1) {
-      const row: number[] = [];
-      for (let c = 1; c <= 40; c += 1) row.push(r * 40 + c);
-      rows.push(row);
-    }
-    const toggleFushi = (v: number) => {
-      setExternalCodes(null);
-      setKl8FushiCodes((prev) => prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]);
-    };
+  const renderCategory = () => {
+    const categoryOptions: { id: Kl8Category; label: string }[] = [
+      { id: 'tail', label: '尾号' },
+      { id: 'road', label: '012路' },
+      { id: 'zone4', label: '4区' },
+      { id: 'zone8', label: '8区' },
+    ];
+    const valueCount = kl8Category === 'tail' ? 10 : kl8Category === 'road' ? 3 : kl8Category === 'zone4' ? 4 : 8;
+    const valueLabels: string[] = kl8Category === 'tail'
+      ? Array.from({ length: 10 }, (_, i) => `尾${i}`)
+      : kl8Category === 'road'
+      ? ['0路', '1路', '2路']
+      : kl8Category === 'zone4'
+      ? ['01-20', '21-40', '41-60', '61-80']
+      : Array.from({ length: 8 }, (_, i) => `${String(i * 10 + 1).padStart(2, '0')}-${String(i * 10 + 10).padStart(2, '0')}`);
+
     return (
       <>
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>玩 法</Text>
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-            <Pressable key={n}
-              onPress={() => setKl8FushiPlaySize(n)}
-              style={btnStyle(kl8FushiPlaySize === n)}>
-              <Text style={txtColor(kl8FushiPlaySize === n)}>选{n}</Text>
+          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>分 类</Text>
+          {categoryOptions.map((o) => (
+            <Pressable
+              key={o.id}
+              onPress={() => { setKl8Category(o.id); setKl8CategoryValue(0); }}
+              style={btnStyle(kl8Category === o.id)}
+            >
+              <Text style={txtColor(kl8Category === o.id)}>{o.label}</Text>
             </Pressable>
           ))}
         </View>
-        <View style={{ marginBottom: 3 }}>
-          {rows.map((row, ri) => (
-            <View key={ri} style={{ flexDirection: 'row', alignItems: 'center', gap: 1, marginBottom: 2 }}>
-              <Text style={{ fontSize: 8, color: '#888', width: 22 }}>
-                {String(row[0]).padStart(2, '0')}-
-              </Text>
-              {row.map((v) => {
-                const active = kl8FushiCodes.includes(v);
-                return (
-                  <Pressable key={v} onPress={() => toggleFushi(v)}
-                    style={{ flex: 1, height: 22, borderRadius: 3, backgroundColor: active ? '#2563eb' : '#f3f4f6', justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 9, color: active ? '#fff' : '#111827', fontWeight: active ? '700' : '400' }}>
-                      {String(v).padStart(2, '0')}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginBottom: 3 }}>
+          <Text style={{ fontSize: 9, color: '#888', width: 32 }}>值</Text>
+          {Array.from({ length: valueCount }, (_, i) => i).map((v) => (
+            <Pressable
+              key={v}
+              onPress={() => setKl8CategoryValue(v)}
+              style={btnStyle(kl8CategoryValue === v)}
+            >
+              <Text style={txtColor(kl8CategoryValue === v)}>{valueLabels[v]}</Text>
+            </Pressable>
           ))}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3 }}>
-          <Text style={{ fontSize: 10, color: '#888' }}>
-            已选 {kl8FushiCodes.length} 个 · 命中 ≥{kl8FushiPlaySize} 个算中
-          </Text>
-          <View style={{ flex: 1 }} />
-          <Pressable onPress={() => setKl8FushiCodes([])}
-            style={{ paddingHorizontal: 10, height: 22, borderRadius: 4, backgroundColor: '#f3f4f6' }}>
-            <Text style={{ fontSize: 11, color: '#111827' }}>清空</Text>
-          </Pressable>
         </View>
       </>
     );
@@ -1408,7 +1406,7 @@ export default function AnalyzeScreen() {
             {tab === 'multi' && renderMulti()}
             {tab === 'heji' && renderHeji()}
         {tab === 'amp' && renderAmp()}
-            {tab === 'fushi' && renderFushi()}
+            {tab === 'category' && renderCategory()}
             {tab === 'random1' && renderPlaceholder('组内随机')}
             {tab === 'random2' && renderPlaceholder('随机交并')}
             {tab === 'group' && renderPlaceholder('分组胆')}
@@ -1522,14 +1520,18 @@ export default function AnalyzeScreen() {
           )}
           <View style={{ flex: 1, position: 'relative' }}>
           {/* 振幅/分类 专用图 */}
-          {tab === 'amp' && (
+          {(tab === 'amp' || tab === 'category') && (
             <View style={{ backgroundColor: '#fff', borderRadius: 4, borderWidth: 1, borderColor: '#e5e7eb', padding: 2, marginBottom: 4, flex: 1 }}>
               {rawData && (
               <SkiaRawChart
                 data={rawData}
                 height={Math.max(200, height - TOP_BAR_H - 8)}
                 width={typeof width === 'number' ? width - 24 : 334}
-                title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                title={
+                  tab === 'amp'
+                    ? `${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`
+                    : `快乐8 ${{ tail: '尾号', road: '012路', zone4: '4区', zone8: '8区' }[kl8Category]} 走势`
+                }
               />
               )}
             </View>

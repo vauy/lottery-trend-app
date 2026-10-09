@@ -156,23 +156,13 @@ export const CALC_ATTRS: Record<CalcAttrKey, { label: string; min: number; max: 
 
 export type Kl8MatchMode = 'all' | 'any' | 'exact';
 
-export type Kl8Play =
-  | '选一' | '选二' | '选三' | '选四' | '选五'
-  | '选六' | '选七' | '选八' | '选九' | '选十';
-
-export const KL8_PLAY_SIZE: Record<Kl8Play, number> = {
-  '选一': 1, '选二': 2, '选三': 3, '选四': 4, '选五': 5,
-  '选六': 6, '选七': 7, '选八': 8, '选九': 9, '选十': 10,
-};
-
 export type Target =
   | { kind: 'digit'; digit: number; pos: Position }
   | { kind: 'setAttr'; attrKey: SetAttrKey; attrValue: string; pos: Position }
   | { kind: 'calcAttr'; calcKey: CalcAttrKey; value: number }
   | { kind: 'set'; codes: Set<string> }
   | { kind: 'kl8Combo'; codes: number[]; matchMode: Kl8MatchMode; matchCount?: number }
-  | { kind: 'kl8Dantuo'; dan: number[]; tuo: number[]; danCounts: number[]; tuoCounts: number[] }
-  | { kind: 'kl8Fushi'; codes: number[]; playSize: number };
+  | { kind: 'kl8Dantuo'; dan: number[]; tuo: number[]; danAll: boolean; danCount: number; tuoCounts: number[] };
 
 // ==================== 命中判定 ====================
 
@@ -278,13 +268,9 @@ export function isHit(record: DrawRecord, target: Target, prevRecord?: DrawRecor
         if (danSet.has(n)) danHit += 1;
         else if (tuoSet.has(n)) tuoHit += 1;
       }
-      return target.danCounts.includes(danHit) && target.tuoCounts.includes(tuoHit);
-    }
-    case 'kl8Fushi': {
-      const codeSet = new Set(target.codes);
-      let hit = 0;
-      for (const n of nums) if (codeSet.has(n)) hit += 1;
-      return hit >= target.playSize;
+      const danOK = target.danAll ? danHit === target.dan.length : danHit === target.danCount;
+      if (!danOK) return false;
+      return target.tuoCounts.includes(tuoHit);
     }
   }
 }
@@ -364,30 +350,19 @@ export function getProbability(
       if (N > V || N > 80) return 0;
       const logTotal = logComb(V, D);
       let p = 0;
-      for (const dk of target.danCounts) {
-        if (dk < 0 || dk > danSize || dk > D) continue;
-        for (const tk of target.tuoCounts) {
-          if (tk < 0 || tk > tuoSize) continue;
-          if (dk + tk > D) continue;
-          const rem = D - dk - tk;
+      const minK = 0;
+      const maxK = Math.min(danSize, D);
+      for (let k = minK; k <= maxK; k += 1) {
+        const danOK = target.danAll ? k === danSize : k === target.danCount;
+        if (!danOK) continue;
+        for (const m of target.tuoCounts) {
+          if (m > tuoSize) continue;
+          if (k + m > D) continue;
+          const rem = D - k - m;
           if (rem > V - N) continue;
-          const lp = logComb(danSize, dk) + logComb(tuoSize, tk) + logComb(V - N, rem) - logTotal;
+          const lp = logComb(danSize, k) + logComb(tuoSize, m) + logComb(V - N, rem) - logTotal;
           p += Math.exp(lp);
         }
-      }
-      return p;
-    }
-    case 'kl8Fushi': {
-      const N = target.codes.length;
-      const K = target.playSize;
-      if (K > N || K > D) return 0;
-      const logTotal = logComb(V, D);
-      let p = 0;
-      for (let hit = K; hit <= Math.min(N, D); hit += 1) {
-        const rem = D - hit;
-        if (rem > V - N) continue;
-        const lp = logComb(N, hit) + logComb(V - N, rem) - logTotal;
-        p += Math.exp(lp);
       }
       return p;
     }
@@ -473,11 +448,8 @@ export function getTargetLabel(target: Target): string {
     case 'kl8Dantuo': {
       const danS = target.dan.map((c) => String(c).padStart(2, '0')).join(' ');
       const tuoS = target.tuo.map((c) => String(c).padStart(2, '0')).join(' ');
-      return `胆中[${target.danCounts.join(',')}] 拖中[${target.tuoCounts.join(',')}] · 胆[${danS}] 拖[${tuoS}]`;
-    }
-    case 'kl8Fushi': {
-      const codes = target.codes.map((c) => String(c).padStart(2, '0')).join(' ');
-      return `选${target.playSize} 复式 · ${codes}`;
+      const danMode = target.danAll ? '胆全中' : `胆中${target.danCount}`;
+      return `${danMode} · 拖中[${target.tuoCounts.join(',')}] · 胆[${danS}] 拖[${tuoS}]`;
     }
   }
 }
@@ -500,10 +472,10 @@ export function getTargetShortLabel(target: Target): string {
         : `中${target.matchCount ?? 1}`;
       return `${mode}${target.codes.length}选`;
     }
-    case 'kl8Dantuo':
-      return `胆${target.danCounts.length}档 拖${target.tuoCounts.length}档`;
-    case 'kl8Fushi':
-      return `选${target.playSize}${target.codes.length}复式`;
+    case 'kl8Dantuo': {
+      const danMode = target.danAll ? '胆全中' : `胆${target.danCount}`;
+      return `${danMode} 拖${target.tuoCounts.length}档`;
+    }
   }
 }
 
