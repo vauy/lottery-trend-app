@@ -7,9 +7,6 @@ import type { DrawRecord } from './types';
 
 export type Position = 'any' | 'wan' | 'qian' | 'bai' | 'shi' | 'ge';
 
-/** 抽样模式：独立（3D/PL3/PL5）| 超几何（快乐8） */
-export type SamplingMode = 'independent' | 'hypergeometric';
-
 /** 从右往左数：ge=1, shi=2, bai=3, qian=4, wan=5；返回从左往右的索引 */
 export function posIndex(pos: Exclude<Position, 'any'>, digitCount: number): number {
   const fromRight = pos === 'ge' ? 1 : pos === 'shi' ? 2 : pos === 'bai' ? 3 : pos === 'qian' ? 4 : 5;
@@ -265,19 +262,9 @@ function countCombinations(
   return count;
 }
 
-export function getProbability(
-  target: Target,
-  V: number,
-  D: number,
-  mode: SamplingMode = 'independent',
-): number {
+export function getProbability(target: Target, V: number, D: number): number {
   switch (target.kind) {
     case 'digit': {
-      if (mode === 'hypergeometric') {
-        // 快乐8：从 V 个号中开 D 个不重复号，命中任一固定号的概率 = D/V
-        if (target.pos === 'any') return D / V;
-        return 1 / V;
-      }
       if (target.pos === 'any') return 1 - Math.pow((V - 1) / V, D);
       return 1 / V;
     }
@@ -298,13 +285,8 @@ export function getProbability(
   }
 }
 
-export function getTheoryMiss(
-  target: Target,
-  V: number,
-  D: number,
-  mode: SamplingMode = 'independent',
-): number {
-  const p = getProbability(target, V, D, mode);
+export function getTheoryMiss(target: Target, V: number, D: number): number {
+  const p = getProbability(target, V, D);
   return p > 0 ? (1 - p) / p : 0;
 }
 
@@ -324,9 +306,8 @@ export function buildTargetSeries(
   target: Target,
   V: number,
   D: number,
-  mode: SamplingMode = 'independent',
 ): TargetPoint[] {
-  const p = getProbability(target, V, D, mode);
+  const p = getProbability(target, V, D);
   const out: TargetPoint[] = [];
   let omission = 0;
   let cumHit = 0;

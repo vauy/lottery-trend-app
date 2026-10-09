@@ -22,7 +22,7 @@ import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart
 import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
 import { buildRawSeries } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
-import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode } from '@/lib/lottery/targets';
+import { buildTargetSeries, getTheoryMiss, type Target, type Position } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
 
 type ChartMode = 'freq' | 'omissionK' | 'omissionLine' | 'omissionLine2';
@@ -215,7 +215,6 @@ export default function AnalyzeScreen() {
 
   const V = game.digitMax - game.digitMin + 1;
   const DD = game.digitCount;
-  const samplingMode: SamplingMode = gameId === 'kl8' ? 'hypergeometric' : 'independent';
   const sumMax = game.digitMax * game.digitCount;
 
   const HEJI_KEYS: readonly { id: string; label: string; min: number; max: number }[] = useMemo(() => [
@@ -306,8 +305,8 @@ export default function AnalyzeScreen() {
     if (records.length === 0) return [];
     const rawLimit = 500 * Math.max(1, period);
     const sliced = records.length > rawLimit ? records.slice(-rawLimit) : records;
-    return buildTargetSeries(sliced, target, V, DD, samplingMode);
-  }, [records, target, V, DD, period, samplingMode]);
+    return buildTargetSeries(sliced, target, V, DD);
+  }, [records, target, V, DD, period]);
 
   // 振幅等原始值序列
   const rawData = useMemo(() => {
@@ -316,7 +315,7 @@ export default function AnalyzeScreen() {
     return buildRawSeries(sliced, ampKey as any);
   }, [records, tab, ampKey]);
 
-  const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD, samplingMode), [target, V, DD, samplingMode]);
+  const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD), [target, V, DD]);
 
   // 全历史最大遗漏（用未截断的 allRecords 计算）
   const historyMaxMiss = useMemo(() => {
@@ -397,7 +396,7 @@ export default function AnalyzeScreen() {
         </Text>
         <Text style={{ fontSize: 9, color: '#fff' }}>▼</Text>
       </Pressable>
-      {(gameId === 'kl8' ? TABS.filter((t) => t.id === 'common') : TABS).map((t) => (
+      {TABS.map((t) => (
         <Pressable key={t.id} onPress={() => {
                     setTab(t.id);
                     setCompareTargets(null);
@@ -865,7 +864,7 @@ export default function AnalyzeScreen() {
                 { id: 'fc3d', label: '福彩3D', enabled: true },
                 { id: 'pl3', label: '排列3', enabled: true },
                 { id: 'pl5', label: '排列5', enabled: true },
-                { id: 'kl8', label: '快乐8', enabled: true },
+                { id: 'kl8', label: '快乐8', enabled: false },
               ].map((g) => (
                 <Pressable
                   key={g.id}
