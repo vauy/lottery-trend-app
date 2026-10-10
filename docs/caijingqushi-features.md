@@ -81,3 +81,65 @@
 5. 自定义数据常驻（AsyncStorage 保存号码组为常驻指标）
 6. 和值K线 / 跨度K线（3D/P3）
 7. 遗漏提醒（本地通知）
+
+## 七、APK 壳结构实测（v4.4.0 / versionCode 33 / 包名 cn.com.rhinoceros）
+
+> 常见检测工具（MT 管理器等）显示「未检测到加固」，实测为**自研动态加载壳**，特征码不在其库里。
+
+| 检查项 | 实测结果 |
+|---|---|
+| dex 文件 | 仅 1 个 `classes.dex`，**84KB**，dex 头合法（`dex\n035`） |
+| dex 内容 | **只有 Android 框架类引用，0 个 `com/cn` 业务类** —— 纯加载器 |
+| 加密业务包 | `assets/d629bc87fda798b558b760ecc354b1a5/d/*.c7f9d44a` 分片（无明文魔数） |
+| 解密器 | `lib/arm64-v8a/libEncryptorP.so`（native 加解密） |
+| 业务资源 | assets 下 40+ 目录：预计算的指标号码集/概率表（见下表） |
+
+**assets 指标资源解码**（拼音首字母 + 内容推断，官方客户端离线计算用的预计算表）：
+
+| 目录 | 推断含义 |
+|---|---|
+| `lzsf/` | 两码组合号码集（990 个 `XX,YY.txt`，内容为含该两码的号码串） |
+| `zldbw / zldsw / zldgw` | 定位 百位/十位/个位 号码集 |
+| `dw8m` | 定位 8 码 |
+| `zx9g / fx9g` | 正向 / 反向 9 码 |
+| `zxem / zxjj / zxlmc / zxlmh` | 正向二码 / 交集 / 连码 / 连码合 |
+| `zdlmc / zdlmh / zjlmc / zjlmh` | 定位/组选 连码 / 连码合 |
+| `d2dhm / d4dhm` | 定 2 码 / 定 4 码号码 |
+| `exhw / wxhw` | 二星 / 五星号码 |
+| `sanmdy23c / smdy23c / lmdy23c / wmdy23c / qmdy23c` | 三星/四星 大底组合表 |
+| `sanch / sich / dlt / ysh / exermdy1` | 三星/四星/大乐透/约数号/二额 大底 |
+| `hjfgIndex.zip / qsxsIndex.zip / indexproba.zip / modelIndex.zip / groupn.zip / indexssq.zip` | 黄金分割 / 趋势线 / 概率 / 模型 / 分组 / 双色球 指数表 |
+
+## 八、脱壳流程（frida 脚本，拿真实业务 dex）
+
+脚本：`tools/dump_dex.js`（三路兜底：hook InMemoryDexClassLoader / DexClassLoader / 定时全内存扫 dex 魔数）。
+
+```bash
+# ① Termux 里装 frida（同机方案，无需电脑）
+pkg install python -y && pip install frida-tools
+
+# ② 下载对应版本的 frida-server（arm64）推到 /data/local/tmp 并启动（root）
+#    https://github.com/frida/frida/releases  → frida-server-<ver>-android-arm64.xz
+su -c '/data/local/tmp/frida-server &'
+
+# ③ 挂上目标进程（-f 冷启动；版本号必须与 frida-tools 一致）
+frida -U -f cn.com.rhinoceros -l dump_dex.js
+# 无 USB 时：frida -H 127.0.0.1:27042 -f cn.com.rhinoceros -l dump_dex.js
+```
+
+- 打开 APP 后脚本会在 6s/15s/30s/60s 各扫一轮，控制台打印 `DUMPED -> …`
+- 结果在 `/data/data/cn.com.rhinoceros/cache/dexdump/*.dex`，用 **MT 管理器（root）**复制出来
+- 拿到 dex 后可回传给开发侧，用 jadx（Java 11+ 即可）反编译分析指标算法
+- 若 dump 出多个 dex：全部都要（业务多 dex），按体积排序，几百 KB~几 MB 的是真货
+
+## 九、功能清单补充（APK 字符串池全量分类）
+
+- **图表**：二阶遗漏K、二阶遗漏图、遗漏线、遗漏统计、同屏出图、个数同屏、全选趋势、多选趋势、保存图片、指标说明
+- **选号**：胆拖选号（胆≤9、拖≤79、不能重复）、复式选号、单复式转换、星别转换、随机胆配、交并集/交并集合、指定大底、粘贴胆码、自定义条件
+- **号码操作**：复制号码、导入号码、粘贴号码、导出号码、号码拆分、转复式复制、查看历史中出、直选组选
+- **周期**：周期 10/20/30/50/100/200 期 快捷档
+- **提醒**：遗漏提醒（「您设置的提醒条件已达成」本地/推送通知）
+- **快乐8 专属**：推荐指标（即开期+前 7 期）、团组一/二、共振指标（N码≥M）、加入自选复式/自选拖码、当前遗漏最大、近期最热、遗漏区间
+- **双色球**：蓝球走势
+- **会员/运营**（不复刻）：会员购买、邀请奖励、提现、赠会员、VIP 锁指标
+- **注册**：手机号+验证码
