@@ -319,6 +319,44 @@ export function Stat({
   );
 }
 
+/* ------------------------------ 多胆同屏网格 ------------------------------ */
+
+/**
+ * 多胆同屏网格。
+ * 竖屏默认 1 列（0-9 十行竖排），横屏/宽屏才 2 列。
+ * 注意：不要写死两列——两列时单格宽度只剩约 48%，而高度若仍用固定小值，
+ * 宽高比失衡会把 K 线压扁，波形完全失真（client 端踩过的坑，这里直接按正确口径实现）。
+ */
+export function TongGrid({
+  children,
+  columns = 1,
+}: {
+  children: React.ReactNode;
+  columns?: number;
+}) {
+  return (
+    <View style={[styles.tongGrid, columns >= 2 && styles.tongGridMulti]}>{children}</View>
+  );
+}
+
+export function TongCell({
+  digit,
+  children,
+  width,
+}: {
+  digit: number | string;
+  children: React.ReactNode;
+  /** 单格宽度（由父级按列数与内容宽度算好后传入，保证宽高比正常） */
+  width?: number;
+}) {
+  return (
+    <View style={[styles.tongCell, width ? { width } : null]}>
+      <Text style={styles.tongCellLabel}>{digit}</Text>
+      {children}
+    </View>
+  );
+}
+
 /* --------------------------------- 表单行 --------------------------------- */
 
 export function Field({
@@ -535,6 +573,34 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: semantic.panelBorder,
+  },
+  /** 同屏网格：默认单列（十行竖排） */
+  tongGrid: {
+    flexDirection: 'column',
+    gap: space.sm,
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  /** 同屏网格：横屏/宽屏两列 */
+  tongGridMulti: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  tongCell: {
+    alignSelf: 'stretch',
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.md,
+    padding: space.xs,
+    position: 'relative',
+  },
+  tongCellLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    color: semantic.brand,
+    marginBottom: 2,
   },
   statLabel: {
     color: semantic.textFaint,

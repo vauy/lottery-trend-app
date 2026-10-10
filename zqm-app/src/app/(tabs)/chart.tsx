@@ -30,6 +30,8 @@ import {
   Segmented,
   Spacer,
   Stat,
+  TongCell,
+  TongGrid,
 } from '../../components/ui/Kit';
 import { useLottery } from '../../hooks/useLottery';
 import { useResponsive } from '../../hooks/useResponsive';
@@ -43,6 +45,7 @@ import {
   buildOmissionKLine,
   buildOmissionKLineDetailed,
   buildOmissionNodes,
+  buildOmissionSeries,
   buildSecondOrderOmission,
   cumulative,
   currentOmission,
@@ -62,7 +65,7 @@ import type { GameId, PosKey } from '../../lib/lottery/types';
 import { fontSize, radius, semantic, space, touch } from '../../lib/theme';
 
 /** 对应帮助文件《K线模式》下的全部模式 */
-type Mode = 'freq' | 'cycle' | 'omitK' | 'omit' | 'second' | 'count' | 'drawOmit';
+type Mode = 'freq' | 'cycle' | 'omitK' | 'omit' | 'second' | 'count' | 'drawOmit' | 'compare';
 
 const MODE_OPTIONS: Array<{ value: Mode; label: string }> = [
   { value: 'freq', label: '频率K线' },
@@ -72,6 +75,18 @@ const MODE_OPTIONS: Array<{ value: Mode; label: string }> = [
   { value: 'second', label: '二阶遗漏' },
   { value: 'count', label: '出次图' },
   { value: 'drawOmit', label: '开出遗漏' },
+  { value: 'compare', label: '多胆同屏' },
+];
+
+/**
+ * 同屏子图类型：多胆同屏时每个格子画什么。
+ * 频率 / 遗漏 / 出次 三种最常用于横向对比多个胆码。
+ */
+type CompareChart = 'freq' | 'omit' | 'count';
+const COMPARE_OPTIONS: Array<{ value: CompareChart; label: string }> = [
+  { value: 'freq', label: '频率K' },
+  { value: 'omit', label: '遗漏图' },
+  { value: 'count', label: '出次' },
 ];
 
 const MA_COLORS = ['#F2B95A', '#4FCDCD', '#B58CF2', '#EF6661'];
@@ -94,6 +109,7 @@ export default function ChartScreen() {
     availH,
     railW,
     railCollapsed,
+    width,
     panelW: chartPanelW,
   } = useResponsive();
 
@@ -117,6 +133,9 @@ export default function ChartScreen() {
   const [extendMA, setExtendMA] = useState(false);
   const [indicatorId, setIndicatorId] = useState('ma');
   const [showMA, setShowMA] = useState(true);
+  /** 多胆同屏：子图类型 + 点按放大的胆码（null = 不放大） */
+  const [compareChart, setCompareChart] = useState<CompareChart>('freq');
+  const [focusDigit, setFocusDigit] = useState<number | null>(null);
 
   /** 切换彩种时把位置/号码重置到该彩种的合法值 */
   useEffect(() => {
@@ -297,6 +316,104 @@ export default function ChartScreen() {
   /** 横屏时控件一律走紧凑模式，避免胶囊按钮在窄栏里换行把图表挤出屏幕 */
   const compact = landscape;
 
+  /* ==================== 多胆同屏 ==================== */
+  /**
+   * 同屏列数与单格尺寸。
+   * 竖屏 1 列 × 十行（0-9 竖排），只有宽屏（≥900dp）才 2 列；
+   * 单格高度独立给足，避免「宽度大、高度小」把 K 线压扁失真。
+   */
+  // 宽高比控制在 2.2~3.3 之间最舒服：太扁（>4）K 线被压平，太方（<2）横向看不出走势
+  const compareColumns = landscape && width >= 720 ? 2 : 1;
+  const compareGap = space.sm;
+  const compareCellW = Math.max(
+    160,
+    Math.floor((chartWidth - (compareColumns - 1) * compareGap) / compareColumns) - 20,
+  );
+  const compareCellH = landscape ? 140 : 150;
+
+  /** 同屏的胆码清单：位置型彩种 0-9；快乐8 只放前 10 个号做示意 */
+  const compareDigits = useMemo(() => {
+    const n = game.style === 'keno' ? 10 : game.digitMax - game.digitMin + 1;
+    const start = game.style === 'keno' ? 1 : game.digitMin;
+    return Array.from({ length: n }, (_, i) => start + i);
+  }, [game]);
+
+  /** 单个胆码的命中序列 */
+  const hitsFor = useMemo(() => {
+    return (d: number) =>
+      records.length ? buildHitSeries(records, game, { kind: 'digit', pos, digit: d }) : [];
+  }, [records, game, pos]);
+
+  /** 多胆同屏：每个胆码一格，点按放大单图 */
+  const renderCompare = () => {
+    if (mode !== 'compare') return null;
+    if (focusDigit !== null) {
+      const hits1 = hitsFor(focusDigit);
+      if (!hits1.length) return null;
+      return (
+        <View style={styles.chartCenter}>
+          <Panel title={`胆码 ${focusDigit} · ${COMPARE_OPTIONS.find((c) => c.value === compareChart)?.label}`}>
+            <Pressable onPress={() => setFocusDigit(null)}>
+              {renderCompareChart(compareChart, hits1, chartWidth, chartHeight * 2)}
+            </Pressable>
+            <Spacer size={space.xs} />
+            <Text style={styles.tip}>再次点击图表返回同屏</Text>
+          </Panel>
+        </View>
+      );
+    }
+    return (
+      <TongGrid columns={compareColumns}>
+        {compareDigits.map((d) => {
+          const hs = hitsFor(d);
+          if (!hs.length) return null;
+          return (
+            <TongCell
+              key={d}
+              digit={d}
+              width={compareColumns === 1 ? undefined : compareCellW}
+            >
+              <Pressable onPress={() => setFocusDigit(d)}>
+                {renderCompareChart(compareChart, hs, compareCellW, compareCellH)}
+              </Pressable>
+            </TongCell>
+          );
+        })}
+      </TongGrid>
+    );
+  };
+
+  /** 同屏单格子图：按类型渲染 */
+  const renderCompareChart = (
+    kind: CompareChart,
+    hs: number[],
+    w: number,
+    h: number,
+  ) => {
+    if (kind === 'freq') {
+      const cum = buildFrequencySeries(hs, cycle);
+      const bars = buildCandles(cum, records, 1, 'left');
+      return <KLineChart series={bars} height={h} landscape={false} />;
+    }
+    if (kind === 'count') {
+      return (
+        <CountChart
+          points={buildCountChart(hs, records, 10, 0)}
+          height={h}
+          landscape={false}
+        />
+      );
+    }
+    const omits = buildOmissionSeries(hs);
+    return (
+      <OmissionChart
+        nodes={buildOmissionNodes(hs, records, [5], false)}
+        height={h}
+        landscape={false}
+      />
+    );
+  };
+
   /* ==================== 图表区（横屏放右侧 / 竖屏放面板下方） ==================== */
   const chartBody = loading ? (
     <Panel compact={compact}>
@@ -310,6 +427,9 @@ export default function ChartScreen() {
     <Panel compact={compact}>
       <Empty text="暂无数据，请点击刷新" />
     </Panel>
+  ) : mode === 'compare' ? (
+    /* 多胆同屏：竖屏 1 列 × 十行，点按放大单图 */
+    <View style={styles.chartCenter}>{renderCompare()}</View>
   ) : (
     <View style={[styles.chartArea, landscape && styles.chartAreaLandscape]}>
       {/* 趋势判断（官方：实际出次 vs 理论出次） */}
@@ -587,6 +707,22 @@ export default function ChartScreen() {
             />
           </Field>
         ) : null}
+
+        {mode === 'compare' ? (
+          <>
+            <Field label="同屏子图" compact={compact}>
+              <Segmented
+                options={COMPARE_OPTIONS}
+                value={compareChart}
+                onChange={(v) => setCompareChart(v as CompareChart)}
+                compact={compact}
+              />
+            </Field>
+            <Text style={styles.tip}>
+              竖屏一列十行（0-9），点按任意一格放大单图；宽屏自动两列。
+            </Text>
+          </>
+        ) : null}
       </Panel>
 
       {/* 横屏在侧栏里也要能换指标，避免为了换指标把屏幕转回竖屏 */}
@@ -847,6 +983,11 @@ const styles = StyleSheet.create({
   chartAreaLandscape: {
     alignItems: 'flex-start',
     gap: space.sm,
+  },
+  /** 图表居中容器：占满可用宽度，内容水平居中 */
+  chartCenter: {
+    width: '100%',
+    alignItems: 'center',
   },
   chartBox: {
     flexGrow: 0,
