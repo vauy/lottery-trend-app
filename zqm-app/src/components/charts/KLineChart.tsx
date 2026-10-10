@@ -29,6 +29,17 @@ export interface KLineChartProps {
   landscape?: boolean;
   /** 顶部标题（可选） */
   title?: string;
+  /**
+   * 理论均线值（官方《遗漏图》里那条贯穿全图的黑色直线）。
+   * 传入后主图会画一条水平虚线，用于判断走势在理论均值上方（热）还是下方（冷）。
+   */
+  theoryLine?: number;
+  /**
+   * 每根蜡烛的自定义配色（遗漏K线的红格 / 蓝格）。
+   * 与 candles 等长时生效：传 '#EF6661' 为红格（范围内开出），
+   * '#4FCDCD' 为蓝格（范围外开出 / 预画蓝格）。
+   */
+  candleColors?: string[];
 }
 
 export function KLineChart({
@@ -37,6 +48,8 @@ export function KLineChart({
   height,
   landscape = false,
   title,
+  theoryLine,
+  candleColors,
 }: KLineChartProps) {
   const option = useMemo<EChartsOption>(() => {
     const { categories, candles } = series;
@@ -50,7 +63,12 @@ export function KLineChart({
       {
         name: 'K线',
         type: 'candlestick',
-        data: ohlc,
+        data: candleColors
+          ? ohlc.map((v, i) => ({
+              value: v,
+              itemStyle: { color: candleColors[i], color0: candleColors[i], borderColor: candleColors[i], borderColor0: candleColors[i] },
+            }))
+          : ohlc,
         barMaxWidth: barMax,
         barMinWidth: 1,
         itemStyle: {
@@ -75,6 +93,23 @@ export function KLineChart({
       });
     }
 
+    /** 理论均线：挂在首条 series 上的水平 markLine（官方《遗漏图》的黑色理论线） */
+    if (theoryLine !== undefined && Number.isFinite(theoryLine)) {
+      (seriesList[0] as any).markLine = {
+        silent: true,
+        symbol: 'none',
+        data: [{ yAxis: theoryLine }],
+        lineStyle: { color: '#E7EDE9', width: 1, type: 'solid', opacity: 0.55 },
+        label: {
+          show: true,
+          position: 'insideEndTop',
+          formatter: `理论 ${theoryLine.toFixed(2)}`,
+          color: '#909C94',
+          fontSize: 9,
+        },
+      };
+    }
+
     return {
       animation: false,
       backgroundColor: 'transparent',
@@ -93,7 +128,7 @@ export function KLineChart({
           }
         : undefined,
     };
-  }, [series, overlays, landscape, title]);
+  }, [series, overlays, landscape, title, theoryLine, candleColors]);
 
   return <EChartView option={option} height={height} />;
 }

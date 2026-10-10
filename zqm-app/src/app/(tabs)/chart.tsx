@@ -41,6 +41,7 @@ import {
   buildDrawOmissionSeries,
   buildFrequencySeries,
   buildOmissionKLine,
+  buildOmissionKLineDetailed,
   buildOmissionNodes,
   buildSecondOrderOmission,
   cumulative,
@@ -48,6 +49,10 @@ import {
   findTurningPoints,
   maxOmission,
   movingAverage,
+  judgeTrend,
+  resolveOmissionRange,
+  theoryCycleFor,
+  type OmissionRangeMode,
   repeatStats,
   temperatureOf,
 } from '../../lib/lottery/analysis';
@@ -71,6 +76,10 @@ const MODE_OPTIONS: Array<{ value: Mode; label: string }> = [
 
 const MA_COLORS = ['#F2B95A', '#4FCDCD', '#B58CF2', '#EF6661'];
 
+/** 遗漏K线红格（设置范围内开出）/ 蓝格（范围外开出，含提前预画） */
+const OMIT_RED = '#EF6661';
+const OMIT_BLUE = '#4FCDCD';
+
 /** 周期与退期的可选档位 */
 const PERIOD_OPTIONS = ['3', '5', '10', '20'];
 const BACK_OPTIONS = ['0', '1', '2', '3', '5'];
@@ -89,6 +98,9 @@ export default function ChartScreen() {
   const [align, setAlign] = useState<'left' | 'right'>('left');
   const [rangeMin, setRangeMin] = useState('0');
   const [rangeMax, setRangeMax] = useState('3');
+  /** 遗漏范围四选项（官方《遗漏K线》）：理论周期 / 当前遗漏 / 计划期 / 自定义 */
+  const [rangeMode, setRangeMode] = useState<OmissionRangeMode>('theory');
+  const [planPeriods, setPlanPeriods] = useState(3);
   const [step, setStep] = useState(10);
   const [back, setBack] = useState(0);
   const [extendMA, setExtendMA] = useState(false);
@@ -123,10 +135,17 @@ export default function ChartScreen() {
     [records, game, target],
   );
 
-  const cycle = useMemo(() => 1 / game.hitProbability, [game]);
+  const cycle = useMemo(() => theoryCycleFor(game, pos), [game, pos]);
   const range = useMemo<[number, number]>(
-    () => [Number(rangeMin) || 0, Number(rangeMax) || 0],
-    [rangeMin, rangeMax],
+    () =>
+      resolveOmissionRange(
+        rangeMode,
+        cycle,
+        currentOmission(hits),
+        planPeriods,
+        [Number(rangeMin) || 0, Number(rangeMax) || 0],
+      ),
+    [rangeMode, cycle, hits, planPeriods, rangeMin, rangeMax],
   );
 
   /** 主图蜡烛：频率K线 / 周期K线 / 遗漏K线 共用同一套渲染 */
@@ -146,6 +165,32 @@ export default function ChartScreen() {
     if (recs.length < 1) return null;
     return buildCandles(cut, recs, mode === 'freq' ? 1 : period, align);
   }, [hits, records, mode, period, align, cycle, range, back]);
+
+  /**
+   * 遗漏K线的红/蓝配色（官方《遗漏K线》）。
+   * 红格 = 设置范围内开出；蓝格 = 范围外开出 或 当前遗漏越界时提前预画的蓝格。
+   * 仅「逐期（周期=1）」时一一对应；做周期聚合时按段内是否含红格决定颜色。
+   */
+  const omitColors = useMemo<string[] | undefined>(() => {
+    if (mode !== 'omitK' || !candleSeries || !hits.length) return undefined;
+    const bars = buildOmissionKLineDetailed(hits, cycle, range);
+    const b = Math.max(0, Math.floor(back));
+    const barsCut = b > 0 ? bars.slice(0, Math.max(1, bars.length - b)) : bars;
+    const n = candleSeries.candles.length;
+    // 逐期：直接一对一
+    if (period === 1) {
+      return candleSeries.candles.map((_, i) => {
+        const kind = barsCut[i]?.kind;
+        return kind === 'red' ? OMIT_RED : OMIT_BLUE;
+      });
+    }
+    // 周期聚合：段内有红格则红，否则蓝
+    return candleSeries.candles.map((_, seg) => {
+      const start = seg * period;
+      const segBars = barsCut.slice(start, start + period);
+      return segBars.some((x) => x.kind === 'red') ? OMIT_RED : OMIT_BLUE;
+    });
+  }, [mode, candleSeries, hits, cycle, range, back, period]);
 
   /** 主图均线 */
   const overlays = useMemo<OverlayLine[]>(() => {
@@ -187,6 +232,9 @@ export default function ChartScreen() {
 
   /** 均线拐点 */
   const turning = useMemo(() => findTurningPoints(nodes, [5, 10, 25]).slice(-6), [nodes]);
+
+  /** 趋势判断（官方：实际出次 vs 理论出次） */
+  const trend = useMemo(() => (hits.length ? judgeTrend(hits, cycle) : null), [hits, cycle]);
 
   /** 二阶遗漏 */
   const secondSeries = useMemo(
@@ -272,13 +320,53 @@ export default function ChartScreen() {
         ) : null}
 
         {showRange ? (
-          <Field label="遗漏范围">
-            <Row gap={space.xs}>
-              <Input value={rangeMin} onChangeText={setRangeMin} keyboardType="numeric" placeholder="最小" />
-              <Text style={styles.dash}>—</Text>
-              <Input value={rangeMax} onChangeText={setRangeMax} keyboardType="numeric" placeholder="最大" />
-            </Row>
-          </Field>
+          <>
+            <Field label="遗漏范围设定">
+              <Segmented
+                options={[
+                  { value: 'theory' as OmissionRangeMode, label: '理论周期' },
+                  { value: 'current' as OmissionRangeMode, label: '当前遗漏' },
+                  { value: 'plan' as OmissionRangeMode, label: '计划期' },
+                  { value: 'custom' as OmissionRangeMode, label: '自定义' },
+                ]}
+                value={rangeMode}
+                onChange={(v) => setRangeMode(v as OmissionRangeMode)}
+              />
+            </Field>
+
+            {rangeMode === 'plan' ? (
+              <Field label={`计划期数：${planPeriods} 期`}>
+                <Segmented
+                  options={[1, 2, 3, 4, 5, 6].map((v) => ({ value: String(v), label: String(v) }))}
+                  value={String(planPeriods)}
+                  onChange={(v) => setPlanPeriods(Number(v))}
+                />
+              </Field>
+            ) : null}
+
+            {rangeMode === 'custom' ? (
+              <Field label="自定义范围">
+                <Row gap={space.xs}>
+                  <Input value={rangeMin} onChangeText={setRangeMin} keyboardType="numeric" placeholder="最小" />
+                  <Text style={styles.dash}>—</Text>
+                  <Input value={rangeMax} onChangeText={setRangeMax} keyboardType="numeric" placeholder="最大" />
+                </Row>
+              </Field>
+            ) : null}
+
+            <Field label="实际生效范围">
+              <Text style={styles.rangeHint}>
+                {range[0]} ~ {range[1]}
+                {rangeMode === 'theory'
+                  ? `（理论遗漏 ${(cycle - 1).toFixed(2)}，当前遗漏 ${currentOmission(hits)}${currentOmission(hits) > Math.ceil(cycle - 1) ? '，已超出理论周期、参考价值下降' : ''}）`
+                  : rangeMode === 'current'
+                    ? `（以当前遗漏 ${currentOmission(hits)} 为起点，看当期机会）`
+                    : rangeMode === 'plan'
+                      ? `（以当前遗漏 ${currentOmission(hits)} 为起点做 ${planPeriods} 期计划）`
+                      : '（自定义）'}
+              </Text>
+            </Field>
+          </>
         ) : null}
 
         {mode === 'count' ? (
@@ -331,6 +419,31 @@ export default function ChartScreen() {
         </Panel>
       ) : (
         <View style={[styles.chartArea, landscape && styles.chartAreaLandscape]}>
+          {/* 趋势判断（官方：实际出次 vs 理论出次） */}
+          {trend ? (
+            <>
+              <Panel bodyStyle={{ paddingVertical: space.sm }}>
+                <Row>
+                  <Text
+                    style={[
+                      styles.trendText,
+                      { color: trend.direction === 'up' ? semantic.hot : trend.direction === 'down' ? semantic.cold : semantic.textDim },
+                    ]}
+                  >
+                    {trend.label}
+                  </Text>
+                </Row>
+                <Spacer size={space.xs} />
+                <Text style={styles.trendMeta}>
+                  近段实际出次 {trend.actual} / 理论出次 {trend.expected.toFixed(1)}
+                  （偏离 {(trend.deviation * 100).toFixed(0)}%）
+                  · 理论遗漏 {(cycle - 1).toFixed(2)} · 当前遗漏 {currentOmission(hits)}
+                </Text>
+              </Panel>
+              <Spacer size={space.md} />
+            </>
+          ) : null}
+
           {/* 遗漏图：节点 + MA5/10/25 */}
           {mode === 'omit' || mode === 'second' ? (
             <View style={[styles.chartBox, { width: chartWidth }]}>
@@ -385,6 +498,7 @@ export default function ChartScreen() {
                 <KLineChart
                   series={candleSeries}
                   overlays={overlays}
+                  candleColors={omitColors}
                   height={chartH}
                   landscape={landscape}
                 />
@@ -557,5 +671,19 @@ const styles = StyleSheet.create({
   },
   dash: {
     color: semantic.textFaint,
+  },
+  rangeHint: {
+    color: semantic.brand,
+    fontSize: fontSize.sm,
+    lineHeight: 18,
+  },
+  trendText: {
+    fontSize: fontSize.md,
+    fontWeight: '700',
+  },
+  trendMeta: {
+    color: semantic.textFaint,
+    fontSize: fontSize.xs,
+    lineHeight: 16,
   },
 });

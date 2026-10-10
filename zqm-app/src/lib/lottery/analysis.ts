@@ -123,10 +123,48 @@ export function repeatStats(hits: number[]): { max: number; current: number } {
 }
 
 /**
+ * 按「分析对象」计算理论中出概率。
+ *
+ * ⚠️ 关键：理论周期（=1/概率）必须随所选分析对象变化，不能用彩种固定值。
+ *   官方帮助《遗漏图》原文举例（独胆/毒胆）：
+ *     「以独胆为例，271 注号码，(1 − 0.271) / 0.271 = 2.69」
+ *   即：不定位一个胆码时理论遗漏为 2.69，而定位某位某码时才是 9（理论周期 10）。
+ *
+ * 各口径的概率：
+ *   - 不定位一个胆码（位置型）：p = 1 − (1 − 1/10)^位数
+ *       福彩3D / 排列三（3 位）→ p = 1 − 0.9³ = 0.271 → 理论遗漏 ≈ 2.69
+ *       排列五（5 位）        → p = 1 − 0.9⁵ = 0.40951 → 理论遗漏 ≈ 1.44
+ *   - 定位某一位某码：p = 1/10 = 0.1 → 理论遗漏 = 9（理论周期 10）
+ *   - 快乐8（1-80 中开 20 个，无位置）：p = 20/80 = 0.25 → 理论遗漏 = 3
+ *
+ * 这一处曾导致「频率K线看起来没有波动」：不定位时误用 0.1 会把振幅放大 3.6 倍，
+ * 曲线被过度缩放后起伏形态失真。图表必须用本函数返回的 cycle。
+ */
+export function theoryCycleFor(game: GameTypeDef, pos: PosKey): number {
+  if (game.style === 'keno') return 1 / game.hitProbability;
+  // 定位某一位：单个数字概率 = 1 / 号码池大小
+  const poolSize = game.digitMax - game.digitMin + 1;
+  const single = 1 / poolSize;
+  if (pos === 'any') {
+    // 不定位：N 位中至少出现一次该数字
+    const p = 1 - Math.pow(1 - single, game.drawCount);
+    return 1 / p;
+  }
+  return 1 / single;
+}
+
+/** 理论遗漏值（= 理论周期 − 1），官方《遗漏图》里那条黑色理论均线 */
+export function theoryOmissionFor(game: GameTypeDef, pos: PosKey): number {
+  return theoryCycleFor(game, pos) - 1;
+}
+
+/**
  * 频率K线的累积值序列。
  *
  * 官方帮助《频率K线》原文：「我们将遗漏一次的线段长度为 -1，中出时线段长度为 9」，
  * 其中 9 = 理论周期 − 1（一星个位理论周期为 10）。
+ * 参考图补充说明更直接：「概率为 20% 的号码，阳线的长度等于四根阴线的长度」——
+ * 即 阳长 / 阴长 = (1/p) − 1，是「比值」而非固定整数。
  * 推广：中出一次 +(cycle − 1)，遗漏一次 −1，曲线围绕理论均值「平衡」波动。
  *
  * ⚠️ cycle − 1 必须保留小数、不能取整：如快乐8 某玩法理论周期 1.278 时，
@@ -197,28 +235,135 @@ export function buildCandles(
 }
 
 /**
- * 遗漏K线（二阶遗漏K线）。
+ * 遗漏K线（二阶遗漏K线）—— 对齐官方帮助《遗漏K线》的「红格 / 蓝格」定义。
  *
- * 只统计「遗漏期数落在 [min,max] 区间内再开出」的情况：
- *  - 符合 → 阳线，长度 = 1/理论概率 − 1（= cycle − 1，保留小数）
- *  - 不符合 → 阴线，长度 = −1
+ * 官方原文：
+ *   「遗漏K线的红格和蓝格都是代表开出。红格子代表在你设置的遗漏范围内开出，
+ *     蓝格子代表在你设置的遗漏范围以外开出。」
+ *   「正面：只要当前遗漏值超出设置的遗漏范围，即使号码没开出，也会提前显示蓝格子。」
+ *   「反面：必须在号码开出后，遗漏K线才有所变化。」
  *
- * 可用于判断号码开出后后续几期是否还会再出。
+ * 因此本函数返回「逐期增量 + 类型」，类型有四种：
+ *   - red    范围内开出   → 阳线，长度 = 1/理论概率 − 1（cycle − 1，保留小数）
+ *   - blue   范围外开出   → 阴线，长度 = −1
+ *   - preBlue 当前遗漏已越界且本期未开出 → 提前预画的蓝格（长度 = −1）
+ *   - none   范围内未开出 → 不画（等于 0，保持图形连续）
+ *
+ * 四种「遗漏范围」选项（官方）：
+ *   1. 理论周期  范围 0 ~ ceil(理论遗漏)；前提是当前遗漏在该范围内，否则失去参考价值
+ *   2. 当前遗漏  范围 = 当前遗漏 ~ 当前遗漏（看当期有无机会）
+ *   3. 计划期    范围 = 当前遗漏 ~ 当前遗漏 + (计划期数 − 1)
+ *   4. 自定义    直接给定 min ~ max
  */
+export type OmissionKBarKind = 'red' | 'blue' | 'preBlue' | 'none';
+
+export interface OmissionKBar {
+  kind: OmissionKBarKind;
+  /** 增量：red = cycle−1，blue / preBlue = −1，none = 0 */
+  delta: number;
+  /** 该期开奖前的遗漏值 */
+  omit: number;
+}
+
+export function buildOmissionKLineDetailed(
+  hits: number[],
+  cycle: number,
+  range: [number, number],
+): OmissionKBar[] {
+  const omits = buildOmissionSeries(hits);
+  const [min, max] = range;
+  const up = cycle - 1;
+  const out: OmissionKBar[] = [];
+  for (let i = 0; i < hits.length; i += 1) {
+    const omit = omits[i];
+    const inRange = omit >= min && omit <= max;
+    if (hits[i] === 1) {
+      out.push({ kind: inRange ? 'red' : 'blue', delta: inRange ? up : -1, omit });
+    } else if (omit > max) {
+      // 未开出但当前遗漏已超出范围 → 提前预画蓝格
+      out.push({ kind: 'preBlue', delta: -1, omit });
+    } else {
+      out.push({ kind: 'none', delta: 0, omit });
+    }
+  }
+  return out;
+}
+
+/** 兼容旧签名：只取增量序列（给 cumulative 用） */
 export function buildOmissionKLine(
   hits: number[],
   cycle: number,
   range: [number, number],
 ): number[] {
-  const omits = buildOmissionSeries(hits);
-  const [min, max] = range;
-  const up = cycle - 1;
-  const out: number[] = [];
-  for (let i = 0; i < hits.length; i += 1) {
-    const inRange = omits[i] >= min && omits[i] <= max;
-    out.push(hits[i] === 1 && inRange ? up : -1);
+  return buildOmissionKLineDetailed(hits, cycle, range).map((b) => b.delta);
+}
+
+/** 遗漏范围四选项 */
+export type OmissionRangeMode = 'theory' | 'current' | 'plan' | 'custom';
+
+/**
+ * 趋势判断 —— 对齐官方对「上升 / 下降 / 水平」趋势的口径：
+ *
+ *  - 上升趋势：实际出次 > 理论出次（两个及以上依次上升的相对高点/低点）
+ *  - 下降趋势：实际出次 < 理论出次（两个及以上依次下降的相对高点/低点）
+ *  - 水平趋势：实际出次 ≈ 理论出次（高点/低点基本在同一水平）
+ *
+ * 这里用「近 1/3 段实际中出次数」与「该段理论中出次数（段长 ÷ 理论周期）」比较，
+ * 并给出偏离度，便于在图上直接标注当前处在哪种趋势。
+ */
+export type TrendDirection = 'up' | 'down' | 'flat';
+
+export interface TrendVerdict {
+  direction: TrendDirection;
+  label: string;
+  /** 实际出次 */
+  actual: number;
+  /** 理论出次（段长 ÷ 理论周期） */
+  expected: number;
+  /** 偏离度 = (实际 − 理论) / 理论 */
+  deviation: number;
+}
+
+export function judgeTrend(hits: number[], cycle: number, windowSize?: number): TrendVerdict {
+  const n = hits.length;
+  const win = Math.min(n, windowSize ?? Math.max(10, Math.round(n / 3)));
+  const seg = n > 0 ? hits.slice(n - win) : [];
+  const actual = seg.reduce((a, b) => a + b, 0);
+  const expected = cycle > 0 ? win / cycle : 0;
+  const deviation = expected > 0 ? (actual - expected) / expected : 0;
+  // 偏离 15% 以内视为水平
+  const direction: TrendDirection = deviation > 0.15 ? 'up' : deviation < -0.15 ? 'down' : 'flat';
+  const label =
+    direction === 'up' ? '上升趋势（实际出次 > 理论出次）'
+      : direction === 'down' ? '下降趋势（实际出次 < 理论出次）'
+        : '水平趋势（实际出次 ≈ 理论出次）';
+  return { direction, label, actual, expected, deviation };
+}
+
+/**
+ * 按官方四种选项计算遗漏范围。
+ * @param current 当前遗漏
+ * @param planPeriods 计划期数（plan 模式用）
+ * @param custom 自定义范围（custom 模式用）
+ */
+export function resolveOmissionRange(
+  mode: OmissionRangeMode,
+  cycle: number,
+  current: number,
+  planPeriods = 3,
+  custom: [number, number] = [0, 4],
+): [number, number] {
+  if (mode === 'theory') {
+    // 理论周期：0 ~ 理论遗漏（当前遗漏超出则失去参考价值，仍按理论范围给出）
+    return [0, Math.ceil(cycle - 1)];
   }
-  return out;
+  if (mode === 'current') {
+    return [current, current];
+  }
+  if (mode === 'plan') {
+    return [current, current + Math.max(0, planPeriods - 1)];
+  }
+  return custom;
 }
 
 /**
