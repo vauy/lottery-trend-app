@@ -1006,8 +1006,8 @@ export default function AnalyzeScreen() {
   /**
    * 毒胆同屏布局（对齐参考图：竖屏即 2 列 × 5 行）。
    * 参考图每码一个小面板，2 列排布，点单格放大成整屏单图。
-   * 单格高度按宽度反推：竖屏半宽约 ~170dp、高 ~210dp（含副图指标），
-   * 横屏半宽 ~356dp、高夹在 [150,220]，保证宽高比不失真。
+   * 单格图表高度按宽度反推：主图 + 副图挤在太矮的格里会糊成一团
+   * （旧值竖屏仅 170dp，主图被压到 ~60dp），这里抬高到 ≥200dp。
    */
   const tongColumns = 2;
   const tongGap = 8;
@@ -1016,8 +1016,8 @@ export default function AnalyzeScreen() {
     Math.floor((contentW - (tongColumns - 1) * tongGap) / tongColumns) - 14,
   );
   const tongH = isLandscape
-    ? Math.round(Math.min(220, Math.max(150, tongW / 1.9)))
-    : Math.round(Math.min(230, Math.max(170, tongW / 1.15)));
+    ? Math.round(Math.min(250, Math.max(180, tongW / 1.7)))
+    : Math.round(Math.min(280, Math.max(210, tongW * 1.35)));
 
   /**
    * 选号已搬进底部抽屉，页面内不再有「选号面板折叠」这回事。
@@ -2132,25 +2132,6 @@ export default function AnalyzeScreen() {
           <MissSumStat values={missSum.values} kind={missSumKind} />
         </Field>
       )}
-      <Field caption="期数 / 分析窗口">
-        <View style={styles.rowBetween}>
-          <TextInput
-            value={countInput}
-            onChangeText={setCountInput}
-            onEndEditing={applyCount}
-            onSubmitEditing={applyCount}
-            keyboardType="numeric"
-            style={styles.numInput}
-            placeholderTextColor={semantic.textFaint}
-            placeholder="500"
-          />
-          <Chip label="应用" active onPress={applyCount} />
-          <Chip label={refreshing ? '刷新中…' : '刷新'} active={false} onPress={() => void refresh()} />
-        </View>
-        <Text style={styles.hint} numberOfLines={2}>
-          {game.name} · 集合 {codesCount} 注 · 理论 {theoryMiss.toFixed(2)} · {source} {records.length}期 / 共{allRecords.length}期
-        </Text>
-      </Field>
     </>
   );
 
@@ -2386,11 +2367,6 @@ export default function AnalyzeScreen() {
   ) => {
     const cur = cellModes[idx] ?? chartModes[0];
     const modeLabel = CELL_MODES.find((c) => c.id === cur)?.label ?? chartMeta[cur]?.title ?? cur;
-    const maOf = (k: number) => {
-      const a = oS.slice(-k).map((p) => p.omission);
-      return a.length > 0 ? a.reduce((x, y) => x + y, 0) / a.length : 0;
-    };
-    const maText = `MA(5):${maOf(5).toFixed(1)} MA(10):${maOf(10).toFixed(1)} MA(20):${maOf(20).toFixed(1)}`;
     const lastOmission = oS.length > 0 ? oS[oS.length - 1].omission : 0;
     const prob = getProbability(ct, V, DD);
     const total = ct.kind === 'digit' && gameId !== 'kl8' ? cellCodesOf(ct).length : codesCount;
@@ -2411,7 +2387,8 @@ export default function AnalyzeScreen() {
             <Text style={styles.cellMoreText}>更多</Text>
           </Pressable>
         </View>
-        {/* 控制行 */}
+        {/* 控制行：图型▾ + 遗漏/概率 + 号码。
+            原来的 MA 摘要行与图上均线重复，已并入本行去掉，高度让给图表 */}
         <View style={styles.cellCtl}>
           <Pressable
             onPress={() => {
@@ -2422,16 +2399,12 @@ export default function AnalyzeScreen() {
             <Text style={styles.cellMode}>{modeLabel} ▾</Text>
           </Pressable>
           <Text style={styles.cellMa} numberOfLines={1}>
-            {maText}
+            {`漏${tMiss.toFixed(2)} 遗${lastOmission} ${(prob * 100).toFixed(1)}%`}
           </Text>
           <Pressable onPress={() => openCodesModal(getTargetLabel(ct), ct)}>
-            <Text style={styles.cellView}>查看号码</Text>
+            <Text style={styles.cellView}>号码</Text>
           </Pressable>
         </View>
-        {/* 信息行 */}
-        <Text style={styles.cellInfo} numberOfLines={1}>
-          {`遗漏周期:${tMiss.toFixed(2)} 当前遗漏:${lastOmission} 概率:${(prob * 100).toFixed(2)}%`}
-        </Text>
       </View>
     );
   };
@@ -2514,7 +2487,10 @@ export default function AnalyzeScreen() {
                 {renderChart(
                   m,
                   chartW,
-                  Math.round(Math.max(chartSize.h * 2, availH - 40) * chartZoom),
+                  // 放大态：高度按宽度反推（约 1.1:1）并夹在可用高度内。
+                  // 旧写法 max(chartSize.h*2, availH-40) 会让高度逼近整屏，
+                  // 主图被纵向拉成细长条（K 线失真），这里对齐参考图比例。
+                  Math.round(Math.min(availH - 40, Math.max(chartSize.h * 1.6, chartW * 1.1)) * chartZoom),
                   s,
                   oSeries,
                   tMiss,
@@ -2543,7 +2519,9 @@ export default function AnalyzeScreen() {
         {!fullscreen && renderZoomBar()}
         <TongGrid columns={tongColumns}>
           {list.map(({ ct, idx }) => {
-            const sliceN = Math.min(records.length, 300);
+            // 同屏格很窄（约 170dp），K 线画太多会糊成一片。
+            // 对齐参考图：单格只画最近 80 期，趋势清晰、不拥挤。
+            const sliceN = Math.min(records.length, 80);
             const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
             const tMiss = getTheoryMiss(ct, V, DD);
             const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
@@ -2898,27 +2876,55 @@ export default function AnalyzeScreen() {
         </View>
       </Modal>
 
-      {/* 周期选择 Modal */}
+      {/* 周期 / 期数 Modal：周期选择 + 期数（分析窗口）输入。
+          期数输入框已从图表下方的「数据」卡片移到这里（对齐参考图：图表区只留图） */}
       <Modal visible={periodMenuOpen} transparent animationType="fade" onRequestClose={() => setPeriodMenuOpen(false)}>
         <Pressable
           style={styles.modalMask}
           onPress={() => setPeriodMenuOpen(false)}
         >
-          <View style={[styles.modalCard, { flexDirection: 'row', flexWrap: 'wrap', maxWidth: 280 }]}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((p) => (
-              <Pressable
-                key={p}
+          <View style={[styles.modalCard, { maxWidth: 300, marginBottom: 110 }]}>
+            <Text style={styles.modalTitle}>周期</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((p) => (
+                <Pressable
+                  key={p}
+                  onPress={() => setPeriod(p)}
+                  style={[styles.modalGridCell, period === p && styles.modalGridCellOn]}
+                >
+                  <Text style={[styles.modalOptionText, period === p && styles.modalOptionTextOn]}>
+                    {p}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={styles.modalDivider} />
+            <Text style={styles.fieldNote}>期数 / 分析窗口</Text>
+            <View style={styles.rowBetween}>
+              <TextInput
+                value={countInput}
+                onChangeText={setCountInput}
+                onEndEditing={applyCount}
+                onSubmitEditing={applyCount}
+                keyboardType="numeric"
+                style={styles.numInput}
+                placeholderTextColor={semantic.textFaint}
+                placeholder="500"
+              />
+              <Chip
+                label="应用"
+                active
                 onPress={() => {
-                  setPeriod(p);
+                  applyCount();
                   setPeriodMenuOpen(false);
                 }}
-                style={[styles.modalGridCell, period === p && styles.modalGridCellOn]}
-              >
-                <Text style={[styles.modalOptionText, period === p && styles.modalOptionTextOn]}>
-                  {p}
-                </Text>
-              </Pressable>
-            ))}
+              />
+              <Chip label={refreshing ? '刷新中…' : '刷新'} active={false} onPress={() => void refresh()} />
+            </View>
+            <Text style={styles.hint} numberOfLines={2}>
+              {game.name} · {source} {records.length}期 / 共{allRecords.length}期
+            </Text>
           </View>
         </Pressable>
       </Modal>
@@ -3031,11 +3037,10 @@ const styles = StyleSheet.create({
     marginLeft: space.xs,
   },
   cellMoreText: { color: semantic.textDim, fontSize: fs.xs },
-  cellCtl: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: 2 },
+  cellCtl: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: 1 },
   cellMode: { color: palette.accent, fontSize: fs.xs, fontWeight: '700' },
-  cellMa: { color: palette.cyan, fontSize: fs.xs, flex: 1 },
+  cellMa: { color: palette.amber, fontSize: fs.xs, flex: 1 },
   cellView: { color: semantic.textDim, fontSize: fs.xs },
-  cellInfo: { color: palette.amber, fontSize: fs.xs, marginTop: 2 },
   cellDrop: {
     position: 'absolute',
     left: space.xs,
