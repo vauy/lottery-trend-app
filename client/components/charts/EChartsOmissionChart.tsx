@@ -63,6 +63,8 @@ export function EChartsOmissionChart({
   mode = 'both',
   historyMaxMiss,
   targetLabel,
+  /** 水平参考线：equal=四等分，split=黄金分割 */
+  overlay = 'none',
 }: {
   series: SeriesPoint[];
   height?: number;
@@ -71,6 +73,7 @@ export function EChartsOmissionChart({
   mode?: ChartMode;
   historyMaxMiss?: number;
   targetLabel?: string;
+  overlay?: 'none' | 'split' | 'equal';
 }) {
   const [rangeIdx, setRangeIdx] = useState(0);
 
@@ -365,6 +368,27 @@ export function EChartsOmissionChart({
       }),
     ].filter(Boolean);
 
+    // 分割/等分水平参考线（基于二阶主格 0..displayMax 量程）
+    if (overlay !== 'none') {
+      const ratios = overlay === 'equal' ? [0.25, 0.5, 0.75] : [0.382, 0.5, 0.618];
+      const xLast = n - 1;
+      for (const r of ratios) {
+        const lvl = r * displayMax;
+        const s = makeSeries(0, {
+          type: 'line',
+          data: [
+            [0, lvl],
+            [xLast, lvl],
+          ],
+          lineStyle: { color: '#909C94', width: 0.8, type: 'dashed' },
+          symbol: 'none',
+          silent: true,
+          z: 1,
+        });
+        if (s) seriesArr.push(s);
+      }
+    }
+
     const option = {
       animation: false,
       backgroundColor: 'transparent',
@@ -403,7 +427,7 @@ export function EChartsOmissionChart({
   </script>
 </body>
 </html>`;
-  }, [series, rangeIdx, theoryMiss, height, width, mode]);
+  }, [series, rangeIdx, theoryMiss, height, width, mode, overlay]);
 
   const showRangeBar = mode !== 'level1';
 

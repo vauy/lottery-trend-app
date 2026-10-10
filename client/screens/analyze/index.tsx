@@ -17,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { Screen } from '@/components/Screen';
 import { EChartsFreqKChart } from '@/components/charts/EChartsFreqKChart';
 import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
@@ -39,9 +39,10 @@ import {
 import { buildRawSeries, buildShapeCodes, getTargetLabel, posIndex, SET_ATTRS, type SetAttrKey, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
-import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
+import { buildTargetSeries, getTheoryMiss, getProbability, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
 import { buildDigitStats } from '@/lib/lottery/analysis';
+import * as Clipboard from 'expo-clipboard';
 import { PickSheet, PEEK_H } from '@/components/ui/PickSheet';
 import {
   ChartCard,
@@ -52,7 +53,6 @@ import {
   Panel,
   Segmented,
   SubTabs,
-  TongCell,
   TongGrid,
   type DigitMark,
 } from '@/components/ui/Kit';
@@ -115,6 +115,23 @@ const CHART_MODES: { id: ChartMode; label: string }[] = [
 ];
 
 const POS_OPTIONS: Position[] = ['any', 'bai', 'shi', 'ge'];
+
+/** 胆码同屏格可切换的图型（对齐官方下拉：频率K / 遗漏图 / 遗漏K） */
+const CELL_MODES: { id: ChartMode; label: string }[] = [
+  { id: 'freq', label: '频率K' },
+  { id: 'omissionLine', label: '遗漏图' },
+  { id: 'omissionK', label: '遗漏K' },
+];
+
+/** 同屏格「更多」菜单项（对齐官方：号码/复制/加入缩水/分割/等分/二阶） */
+const CELL_MENU: { key: string; label: string }[] = [
+  { key: 'codes', label: '号码' },
+  { key: 'copy', label: '复制' },
+  { key: 'shrink', label: '加入缩水' },
+  { key: 'split', label: '分割' },
+  { key: 'equal', label: '等分' },
+  { key: 'second', label: '二阶' },
+];
 
 /**
  * 遗漏和统计 —— 官方:「当本期开出 ≥ 均值 11 的遗漏和时，下期 90% 的机会向下掉头，
@@ -422,6 +439,23 @@ export default function AnalyzeScreen() {
   const [kl8HeatMode, setKl8HeatMode] = useState<Kl8HeatMode>('freq');
   const [chartModes, setChartModes] = useState<ChartMode[]>(['freq']);
   const [compareTargets, setCompareTargets] = useState<Target[] | null>(null);
+  /** 同屏每格图型（idx → ChartMode），未设置的跟随 chartModes[0] */
+  const [cellModes, setCellModes] = useState<Record<number, ChartMode>>({});
+  /** 同屏每格水平参考线（更多菜单「分割/等分」） */
+  const [cellOverlay, setCellOverlay] = useState<Record<number, 'none' | 'split' | 'equal'>>({});
+  /** 下拉（图型）/竖排菜单（更多）展开的格 idx */
+  const [cellDropIdx, setCellDropIdx] = useState<number | null>(null);
+  const [cellMenuIdx, setCellMenuIdx] = useState<number | null>(null);
+  /** 「查看号码」弹窗 */
+  const [codesModal, setCodesModal] = useState<{ label: string; codes: string[]; total: number } | null>(null);
+
+  /** 同屏状态整体复位（换胆码组合 / 退出同屏时调用） */
+  const resetCellUi = () => {
+    setCellModes({});
+    setCellOverlay({});
+    setCellDropIdx(null);
+    setCellMenuIdx(null);
+  };
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [dataTaskRunning, setDataTaskRunning] = useState(false);
   const [dataTaskMsg, setDataTaskMsg] = useState('');
@@ -1571,6 +1605,7 @@ export default function AnalyzeScreen() {
     const targets: Target[] = sorted.map((d) => ({ kind: 'digit', digit: d, pos: 'any' }));
     setCompareTargets(targets);
     setPickExpanded(false);
+    resetCellUi();
   };
 
   /** 生成"毒胆对码同屏"：每个胆码 + 对码各一张 */
@@ -1584,6 +1619,7 @@ export default function AnalyzeScreen() {
     }
     setCompareTargets(targets);
     setPickExpanded(false);
+    resetCellUi();
   };
 
   /** 二码合、二码差同屏 */
@@ -1595,6 +1631,7 @@ export default function AnalyzeScreen() {
     ];
     setCompareTargets(targets);
     setPickExpanded(false);
+    resetCellUi();
   };
 
   const renderDan = () => (
@@ -2035,6 +2072,8 @@ export default function AnalyzeScreen() {
     tMiss: number,
     label: string,
     historyMax?: number,
+    /** 水平参考线（同屏格「分割/等分」） */
+    overlay: 'none' | 'split' | 'equal' = 'none',
   ) => {
     // 快乐8 分布图形：80 号热力图（与目标序列无关，走游戏级数据）
     if (m === 'kl8dist') {
@@ -2125,6 +2164,7 @@ export default function AnalyzeScreen() {
           hideShadow={period <= 1}
           heightScale={1}
           targetLabel={label}
+          overlay={overlay}
         />
       );
     }
@@ -2137,6 +2177,7 @@ export default function AnalyzeScreen() {
           theoryMiss={tMiss}
           secondOrderP={secondOrderFromTheory(tMiss)}
           targetLabel={label}
+          overlay={overlay}
         />
       );
     }
@@ -2150,6 +2191,7 @@ export default function AnalyzeScreen() {
           targetLabel={label}
           historyMaxMiss={historyMax}
           mode="level1"
+          overlay={overlay}
         />
       );
     }
@@ -2163,10 +2205,190 @@ export default function AnalyzeScreen() {
           targetLabel={label}
           historyMaxMiss={historyMax}
           mode="level2"
+          overlay={overlay}
         />
       );
     }
     return null;
+  };
+
+  /** digit 目标命中的号码集合（D 位枚举，含该数字 / 定位等于该数字） */
+  const cellCodesOf = (ct: Target): string[] => {
+    if (ct.kind !== 'digit') return [];
+    const out: string[] = [];
+    eachNumber(DD, (nums) => {
+      const hitOk =
+        ct.pos === 'any' ? nums.includes(ct.digit) : nums[posIndex(ct.pos, DD)] === ct.digit;
+      if (hitOk) out.push(nums.join(''));
+    });
+    return out;
+  };
+
+  /** 「查看号码」弹窗（>400 注截断展示，标题给总数） */
+  const openCodesModal = (label: string, ct: Target) => {
+    setCellDropIdx(null);
+    setCellMenuIdx(null);
+    const codes = cellCodesOf(ct);
+    setCodesModal({ label, codes: codes.slice(0, 400), total: codes.length });
+  };
+
+  /** 同屏格「更多」菜单动作 */
+  const handleCellMenu = (idx: number, ct: Target, key: string) => {
+    setCellMenuIdx(null);
+    if (key === 'codes') {
+      openCodesModal(getTargetLabel(ct), ct);
+      return;
+    }
+    if (key === 'copy') {
+      if (gameId === 'kl8') {
+        Alert.alert('复制', '快乐8 目标不适用号码复制');
+        return;
+      }
+      const codes = cellCodesOf(ct);
+      Clipboard.setStringAsync(codes.join(' ')).then(() =>
+        Alert.alert('复制', `已复制 ${codes.length} 注号码`),
+      );
+      return;
+    }
+    if (key === 'shrink') {
+      if (gameId === 'kl8') {
+        Alert.alert('加入缩水', '快乐8 号码不适用数字彩缩水');
+        return;
+      }
+      const codes = cellCodesOf(ct);
+      Clipboard.setStringAsync(codes.join(' ')).then(() => {
+        const path = gameId === 'pl5' ? '/(tabs)/pl5-shrink' : '/(tabs)/shrink';
+        router.push({ pathname: path, params: { importCodes: codes.join(' ') } });
+      });
+      return;
+    }
+    if (key === 'split' || key === 'equal') {
+      const next = key as 'split' | 'equal';
+      setCellOverlay((v) => ({ ...v, [idx]: v[idx] === next ? 'none' : next }));
+      return;
+    }
+    if (key === 'second') {
+      // 二阶：当前格在 频率K/遗漏图 ↔ 遗漏K(二阶) 间切换
+      const cur = cellModes[idx] ?? chartModes[0];
+      setCellModes((v) => ({ ...v, [idx]: cur === 'omissionK' ? 'freq' : 'omissionK' }));
+      return;
+    }
+  };
+
+  /**
+   * 同屏格头部三行（对齐官方参考图）：
+   * 标题行「毒胆·N·直选X注 | 更多」、控制行「图型 ▾ | MA摘要 | 查看号码」、信息行「遗漏周期/当前遗漏/概率」。
+   * 图型下拉与更多菜单为绝对定位浮层，展开时覆盖在本格图表上方。
+   */
+  const renderCellHeader = (
+    idx: number,
+    ct: Target,
+    tMiss: number,
+    oS: { issue: string; omission: number }[],
+    label: string,
+  ) => {
+    const cur = cellModes[idx] ?? chartModes[0];
+    const modeLabel = CELL_MODES.find((c) => c.id === cur)?.label ?? chartMeta[cur]?.title ?? cur;
+    const maOf = (k: number) => {
+      const a = oS.slice(-k).map((p) => p.omission);
+      return a.length > 0 ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+    };
+    const maText = `MA(5):${maOf(5).toFixed(1)} MA(10):${maOf(10).toFixed(1)} MA(20):${maOf(20).toFixed(1)}`;
+    const lastOmission = oS.length > 0 ? oS[oS.length - 1].omission : 0;
+    const prob = getProbability(ct, V, DD);
+    const total = ct.kind === 'digit' && gameId !== 'kl8' ? cellCodesOf(ct).length : codesCount;
+    return (
+      <View>
+        {/* 标题行 */}
+        <View style={styles.cellHead}>
+          <Text style={styles.cellTitle} numberOfLines={1}>
+            毒胆·{label}·直选{total}注
+          </Text>
+          <Pressable
+            style={styles.cellMore}
+            onPress={() => {
+              setCellDropIdx(null);
+              setCellMenuIdx(cellMenuIdx === idx ? null : idx);
+            }}
+          >
+            <Text style={styles.cellMoreText}>更多</Text>
+          </Pressable>
+        </View>
+        {/* 控制行 */}
+        <View style={styles.cellCtl}>
+          <Pressable
+            onPress={() => {
+              setCellMenuIdx(null);
+              setCellDropIdx(cellDropIdx === idx ? null : idx);
+            }}
+          >
+            <Text style={styles.cellMode}>{modeLabel} ▾</Text>
+          </Pressable>
+          <Text style={styles.cellMa} numberOfLines={1}>
+            {maText}
+          </Text>
+          <Pressable onPress={() => openCodesModal(getTargetLabel(ct), ct)}>
+            <Text style={styles.cellView}>查看号码</Text>
+          </Pressable>
+        </View>
+        {/* 信息行 */}
+        <Text style={styles.cellInfo} numberOfLines={1}>
+          {`遗漏周期:${tMiss.toFixed(2)} 当前遗漏:${lastOmission} 概率:${(prob * 100).toFixed(2)}%`}
+        </Text>
+      </View>
+    );
+  };
+
+  /** 同屏格浮层：图型下拉 + 更多竖排菜单（必须在图表 WebView 之后渲染才能盖住它） */
+  const renderCellOverlays = (idx: number, ct: Target) => {
+    const cur = cellModes[idx] ?? chartModes[0];
+    return (
+      <View pointerEvents="box-none">
+        {/* 图型下拉浮层 */}
+        {cellDropIdx === idx && (
+          <View style={styles.cellDrop}>
+            {CELL_MODES.map((c) => (
+              <Pressable
+                key={c.id}
+                style={styles.cellDropItem}
+                onPress={() => {
+                  setCellModes((v) => ({ ...v, [idx]: c.id }));
+                  setCellDropIdx(null);
+                }}
+              >
+                <Text style={[styles.cellDropText, cur === c.id && styles.cellDropTextOn]}>
+                  {c.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+        {/* 更多竖排菜单浮层 */}
+        {cellMenuIdx === idx && (
+          <View style={styles.cellMenu}>
+            {CELL_MENU.map((it) => (
+              <Pressable
+                key={it.key}
+                style={styles.cellDropItem}
+                onPress={() => handleCellMenu(idx, ct, it.key)}
+              >
+                <Text
+                  style={[
+                    styles.cellDropText,
+                    (it.key === 'split' || it.key === 'equal') &&
+                      cellOverlay[idx] === it.key &&
+                      styles.cellDropTextOn,
+                    it.key === 'second' && cur === 'omissionK' && styles.cellDropTextOn,
+                  ]}
+                >
+                  {it.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </View>
+    );
   };
 
   /** 毒胆同屏：竖屏 1 列 × 10 行；点按放大单图 */
@@ -2178,17 +2400,19 @@ export default function AnalyzeScreen() {
 
     // 满屏模式：单张大图（水平居中）
     if (focusedIdx !== null && list.length > 0) {
-      const { ct } = list[0];
+      const { ct, idx } = list[0];
       const sliceN = records.length;
       const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
       const tMiss = getTheoryMiss(ct, V, DD);
       const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
-      const m = chartModes[0]; // 同屏只显示第一种图
+      const m = cellModes[idx] ?? chartModes[0];
+      const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
       return (
         <>
           {!fullscreen && renderZoomBar()}
           <View style={styles.chartCenter}>
-            <ChartCard title={getTargetLabel(ct)} meta={chartMeta[m].title}>
+            <View style={styles.cellBox}>
+              {renderCellHeader(idx, ct, tMiss, oSeries, label)}
               <Pressable onPress={() => setFocusedIdx(null)}>
                 {renderChart(
                   m,
@@ -2198,9 +2422,12 @@ export default function AnalyzeScreen() {
                   oSeries,
                   tMiss,
                   getTargetLabel(ct),
+                  historyMaxMiss,
+                  cellOverlay[idx] ?? 'none',
                 )}
               </Pressable>
-            </ChartCard>
+              {renderCellOverlays(idx, ct)}
+            </View>
           </View>
           <View style={{ height: space.md }} />
           <View style={styles.chipRow}>
@@ -2225,10 +2452,11 @@ export default function AnalyzeScreen() {
             const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
             // 胆码标签
             const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
-            const m = chartModes[0]; // 同屏只显示第一种图
+            const m = cellModes[idx] ?? chartModes[0];
             const cellW = tongW;
             return (
-              <TongCell key={idx} digit={label} width={tongW}>
+              <View key={idx} style={[styles.cellBox, tongColumns === 2 && { width: tongW }]}>
+                {renderCellHeader(idx, ct, tMiss, oSeries, label)}
                 <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
                   {renderChart(
                     m,
@@ -2238,9 +2466,12 @@ export default function AnalyzeScreen() {
                     oSeries,
                     tMiss,
                     getTargetLabel(ct),
+                    historyMaxMiss,
+                    cellOverlay[idx] ?? 'none',
                   )}
                 </Pressable>
-              </TongCell>
+                {renderCellOverlays(idx, ct)}
+              </View>
             );
           })}
         </TongGrid>
@@ -2469,6 +2700,40 @@ export default function AnalyzeScreen() {
       </View>
       </DensityProvider>
 
+      {/* 查看号码弹窗（同屏格「号码 / 查看号码」） */}
+      <Modal
+        visible={codesModal !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCodesModal(null)}
+      >
+        <Pressable style={styles.modalMask} onPress={() => setCodesModal(null)}>
+          <Pressable style={styles.codesSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.codesHead}>
+              <Text style={styles.codesTitle} numberOfLines={1}>
+                {codesModal?.label} · 共 {codesModal?.total ?? 0} 注{((codesModal?.total ?? 0) > (codesModal?.codes.length ?? 0)) ? '（展示前 400 注）' : ''}
+              </Text>
+              <Pressable onPress={() => setCodesModal(null)}>
+                <Text style={styles.codesClose}>关闭</Text>
+              </Pressable>
+            </View>
+            <ScrollView style={styles.codesList} nestedScrollEnabled>
+              <Text style={styles.codesText}>{codesModal?.codes.join('  ')}</Text>
+            </ScrollView>
+            <Pressable
+              style={styles.codesCopyBtn}
+              onPress={() => {
+                if (!codesModal) return;
+                Clipboard.setStringAsync(codesModal.codes.join(' '));
+                Alert.alert('复制', `已复制 ${codesModal.total} 注号码`);
+              }}
+            >
+              <Text style={styles.codesCopyText}>复制全部</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* 彩种选择 / 数据任务 Modal */}
       <Modal visible={gameMenuOpen} transparent animationType="fade" onRequestClose={() => setGameMenuOpen(false)}>
         <Pressable
@@ -2619,6 +2884,83 @@ export default function AnalyzeScreen() {
 
 const styles = StyleSheet.create({
   shell: { flex: 1, backgroundColor: semantic.pageBg },
+
+  /* ── 胆码同屏格头部（对齐参考图：毒胆·N·直选X注 | 更多 / 图型▾ | MA | 查看号码 / 信息行） ── */
+  cellBox: {
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.sm,
+    padding: space.xs,
+    backgroundColor: semantic.panelBg,
+  },
+  cellHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cellTitle: { color: semantic.text, fontSize: fs.sm, fontWeight: '700', flex: 1 },
+  cellMore: {
+    backgroundColor: semantic.panelBorder,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: space.xs,
+  },
+  cellMoreText: { color: semantic.textDim, fontSize: fs.xs },
+  cellCtl: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginTop: 2 },
+  cellMode: { color: palette.accent, fontSize: fs.xs, fontWeight: '700' },
+  cellMa: { color: palette.cyan, fontSize: fs.xs, flex: 1 },
+  cellView: { color: semantic.textDim, fontSize: fs.xs },
+  cellInfo: { color: palette.amber, fontSize: fs.xs, marginTop: 2 },
+  cellDrop: {
+    position: 'absolute',
+    left: space.xs,
+    top: 64,
+    zIndex: 30,
+    elevation: 30,
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.sm,
+    minWidth: 88,
+  },
+  cellMenu: {
+    position: 'absolute',
+    right: space.xs,
+    top: 24,
+    zIndex: 30,
+    elevation: 30,
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.sm,
+    minWidth: 96,
+  },
+  cellDropItem: { paddingHorizontal: space.sm, paddingVertical: 7 },
+  cellDropText: { color: semantic.textDim, fontSize: fs.sm },
+  cellDropTextOn: { color: palette.accent, fontWeight: '700' },
+  codesSheet: {
+    alignSelf: 'stretch',
+    marginHorizontal: space.lg,
+    marginTop: '22%',
+    maxHeight: '60%',
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.md,
+    padding: space.sm,
+  },
+  codesHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.xs },
+  codesTitle: { color: semantic.text, fontSize: fs.sm, fontWeight: '700', flex: 1 },
+  codesClose: { color: palette.accent, fontSize: fs.sm, marginLeft: space.sm },
+  codesList: { maxHeight: 320 },
+  codesText: { color: semantic.textDim, fontSize: fs.xs, lineHeight: 18 },
+  codesCopyBtn: {
+    marginTop: space.xs,
+    alignItems: 'center',
+    backgroundColor: semantic.panelBorder,
+    borderRadius: radius.sm,
+    paddingVertical: 8,
+  },
+  codesCopyText: { color: semantic.text, fontSize: fs.sm, fontWeight: '700' },
+
 
   /* ── 顶栏（对齐参考图单行：位置▼ 彩种▼ · 期数 · 奖 · ＋） ── */
   topbar: {

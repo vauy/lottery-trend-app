@@ -34,6 +34,8 @@ export function EChartsOmissionKChart({
   theoryMiss = 0,
   secondOrderP,
   targetLabel,
+  /** 水平参考线：equal=四等分，split=黄金分割 */
+  overlay = 'none',
 }: {
   series: TargetPoint[];
   height?: number;
@@ -42,6 +44,7 @@ export function EChartsOmissionKChart({
   /** 二阶概率 p₂；不传则由 theoryMiss 反推 */
   secondOrderP?: number;
   targetLabel?: string;
+  overlay?: 'none' | 'split' | 'equal';
 }) {
   const html = useMemo(() => {
     const p2 = secondOrderP ?? secondOrderFromTheory(theoryMiss);
@@ -91,6 +94,26 @@ export function EChartsOmissionKChart({
       };
     }`;
 
+    // 分割/等分水平参考线
+    const overlayRatios =
+      overlay === 'equal' ? [0.25, 0.5, 0.75] : overlay === 'split' ? [0.382, 0.5, 0.618] : [];
+    const overlayLo = Math.min(...allY);
+    const overlayHi = Math.max(...allY);
+    const overlaySeries = overlayRatios
+      .map((r) => {
+        const lvl = overlayLo + r * (overlayHi - overlayLo);
+        return `,
+        {
+          type: 'line',
+          data: ${JSON.stringify(Array(n).fill(Number(lvl.toFixed(4))))},
+          lineStyle: { color: '${palette.inkDim}', width: 0.8, type: 'dashed' },
+          symbol: 'none',
+          silent: true,
+          z: 1
+        }`;
+      })
+      .join('');
+
     const optionStr = `{
       animation: false,
       backgroundColor: 'transparent',
@@ -116,7 +139,7 @@ export function EChartsOmissionKChart({
           renderItem: ${renderItemFn},
           data: ${JSON.stringify(dataFinal)},
           z: 5
-        }
+        }${overlaySeries}
       ]
     }`;
 
@@ -140,7 +163,7 @@ export function EChartsOmissionKChart({
   </script>
 </body>
 </html>`;
-  }, [series, theoryMiss, secondOrderP, height, width, targetLabel]);
+  }, [series, theoryMiss, secondOrderP, height, width, targetLabel, overlay]);
 
   return (
     <View style={{ width, height }}>
