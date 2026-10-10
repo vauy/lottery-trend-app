@@ -960,26 +960,33 @@ export default function AnalyzeScreen() {
    * 原来内联在页面滚动区里，选号一展开就把图表挤没了；
    * 现在整块搬进 PickSheet，页面主体只留图表与数据。
    */
+  /**
+   * 抽屉固定区：分组页签行（对齐参考图「常用 / 系统 / 定制」）。
+   * 固定在把手下方、不随内容滚动；图型栏则固定在抽屉下方（bottomOffset 让位）。
+   */
+  const renderDrawerGroups = () => (
+    <View style={styles.drawerGroups}>
+      {drawerGroups.map((g) => {
+        const on = activeDrawerGroup.id === g.id;
+        return (
+          <Pressable
+            key={g.id}
+            onPress={() => { if (g.tabs[0]) onTabChange(g.tabs[0].id); }}
+            style={[styles.dgTab, on && styles.dgTabOn]}
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={[styles.dgTabText, on && styles.dgTabTextOn]}>
+              {g.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
   const renderPickContent = () => (
     <>
-      {/* 分组页签（对齐参考图：常用 / 系统 / 定制）+ 组内子页签 */}
-      <View style={styles.drawerGroups}>
-        {drawerGroups.map((g) => {
-          const on = activeDrawerGroup.id === g.id;
-          return (
-            <Pressable
-              key={g.id}
-              onPress={() => { if (g.tabs[0]) onTabChange(g.tabs[0].id); }}
-              style={[styles.dgTab, on && styles.dgTabOn]}
-              accessibilityState={{ selected: on }}
-            >
-              <Text style={[styles.dgTabText, on && styles.dgTabTextOn]}>
-                {g.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {/* 组内子页签（分组行已上移到抽屉固定区） */}
       {activeDrawerGroup.tabs.length > 0 ? (
         <SubTabs items={activeDrawerGroup.tabs} value={tab} onChange={onTabChange} />
       ) : (
@@ -2618,15 +2625,20 @@ export default function AnalyzeScreen() {
             expanded={pickExpanded}
             onChange={setPickExpanded}
             bottomOffset={bottomBarH}
+            fixedHeader={renderDrawerGroups()}
           >
             {renderPickContent()}
           </PickSheet>
         )}
 
-        {/* ───── 底部固定图型栏（对齐参考图：频率K 遗漏图 遗漏K 指标 出次 周期 同屏 •••） ───── */}
+        {/* ───── 底部固定图型栏（对齐参考图：频率K 遗漏图 遗漏K 指标 出次 周期 同屏 •••）
+            固定显示在抽屉上方：层级高于抽屉（zIndex/elevation），抽屉从其上沿拉开 ───── */}
         {!fullscreen && (
           <View
-            style={{ paddingBottom: isLandscape ? 0 : insets.bottom }}
+            style={[
+              { paddingBottom: isLandscape ? 0 : insets.bottom, backgroundColor: semantic.pageBg },
+              styles.chartBarFixed,
+            ]}
             onLayout={(e) => setBottomBarH(e.nativeEvent.layout.height)}
           >
             <View style={styles.chartBar}>
@@ -2886,6 +2898,8 @@ const styles = StyleSheet.create({
   shell: { flex: 1, backgroundColor: semantic.pageBg },
 
   /* ── 胆码同屏格头部（对齐参考图：毒胆·N·直选X注 | 更多 / 图型▾ | MA | 查看号码 / 信息行） ── */
+  /** 图型栏固定层：盖过抽屉（zIndex 30 > 抽屉 20），始终贴底可见 */
+  chartBarFixed: { zIndex: 30, elevation: 10 },
   cellBox: {
     position: 'relative',
     borderWidth: 1,

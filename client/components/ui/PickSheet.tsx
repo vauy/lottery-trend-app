@@ -43,6 +43,8 @@ export interface PickSheetProps {
   gameName: string;
   /** 抽屉内容（选号表单） */
   children: ReactNode;
+  /** 固定在把手下方、不随内容滚动的区（如「常用/系统/定制」分组页签行） */
+  fixedHeader?: ReactNode;
   /** 展开状态变化回调 */
   onChange?: (expanded: boolean) => void;
   /** 受控展开：由外部（如顶栏按钮）驱动开合 */
@@ -57,6 +59,7 @@ export function PickSheet({
   tabLabel,
   gameName,
   children,
+  fixedHeader,
   onChange,
   expanded,
   bottomOffset = 0,
@@ -194,6 +197,9 @@ export function PickSheet({
       </View>
       <View style={styles.divider} />
 
+      {/* ───── 固定区：不随内容滚动（分组页签行，对齐参考图） ───── */}
+      {fixedHeader ? <View style={styles.fixedHeader}>{fixedHeader}</View> : null}
+
       {/* ───── 内容区：正常上下滚动，手势不参与开合 ───── */}
       <ScrollView
         style={styles.scroll}
@@ -248,6 +254,11 @@ const styles = StyleSheet.create({
   handleGame: { fontSize: fs.micro, color: semantic.textDim, marginTop: 2 },
   handleArrow: { fontSize: fs.sm, color: semantic.textDim },
   divider: { height: 1, backgroundColor: semantic.divider },
+  fixedHeader: {
+    paddingHorizontal: space.md,
+    paddingTop: space.xs,
+    backgroundColor: semantic.panelBg,
+  },
   scroll: { flex: 1 },
   scrollInner: { padding: space.md, paddingBottom: space.xxl },
 });
