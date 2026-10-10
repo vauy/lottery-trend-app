@@ -232,33 +232,34 @@ function genRandomCodes(D: number, pool: number[], count: number, seed: number):
 }
 
 // 按类型判断单个号码是否命中
+/** 共享空集合：快速枚举里代替「无配码」的目标集，避免每号建新 Set */
+const EMPTY_SET: Set<number> = new Set();
+
+/** 一组数字的「两两和尾」集合（模块级：供 matchFilter 与快速枚举复用） */function sumSet(arr: number[]): Set<number> {
+  const s = new Set<number>();
+  if (arr.length === 1) { s.add(arr[0]); return s; }
+  for (let i = 0; i < arr.length; i += 1) {
+    for (let j = i + 1; j < arr.length; j += 1) {
+      s.add((arr[i] + arr[j]) % 10);
+    }
+  }
+  return s;
+}
+
+/** 一组数字的「两两差」集合 */
+function diffSet(arr: number[]): Set<number> {
+  const s = new Set<number>();
+  if (arr.length === 1) { s.add(arr[0]); return s; }
+  for (let i = 0; i < arr.length; i += 1) {
+    for (let j = i + 1; j < arr.length; j += 1) {
+      s.add(Math.abs(arr[i] - arr[j]));
+    }
+  }
+  return s;
+}
+
 function matchFilter(type: string, nums: number[], dan: number[], pei: number[]): boolean {
   if (dan.length === 0) return false;
-
-  /** 一组数字的「两两和尾」集合 */
-  function sumSet(arr: number[]): Set<number> {
-    const s = new Set<number>();
-    if (arr.length === 1) { s.add(arr[0]); return s; }
-    for (let i = 0; i < arr.length; i += 1) {
-      for (let j = i + 1; j < arr.length; j += 1) {
-        s.add((arr[i] + arr[j]) % 10);
-      }
-    }
-    return s;
-  }
-
-  /** 一组数字的「两两差」集合 */
-  function diffSet(arr: number[]): Set<number> {
-    const s = new Set<number>();
-    if (arr.length === 1) { s.add(arr[0]); return s; }
-    for (let i = 0; i < arr.length; i += 1) {
-      for (let j = i + 1; j < arr.length; j += 1) {
-        s.add(Math.abs(arr[i] - arr[j]));
-      }
-    }
-    return s;
-  }
-
   switch (type) {
     case 'draw': {
       // 开奖号：含任意一个胆码即可（OR 语义）
@@ -276,33 +277,103 @@ function matchFilter(type: string, nums: number[], dan: number[], pei: number[])
     case 'sum': {
       // 两码合：号码两码和尾 与 胆码两两和尾 有交集
       const s = allPairSums(nums);
-      const danTargets = sumSet(dan);
-      if (!setIntersects(s, danTargets)) return false;
-      if (pei.length > 0) {
-        const peiTargets = sumSet(pei);
-        if (!setIntersects(s, peiTargets)) return false;
-      }
+      if (!setIntersects(s, sumSet(dan))) return false;
+      if (pei.length > 0 && !setIntersects(s, sumSet(pei))) return false;
       return true;
     }
     case 'diff': {
       // 两码差：号码两码差 与 胆码本身（或胆码两两差）有交集
       const s = allPairDiffs(nums);
-      const danTargets = diffSet(dan);
-      if (!setIntersects(s, danTargets)) return false;
-      if (pei.length > 0) {
-        const peiTargets = diffSet(pei);
-        if (!setIntersects(s, peiTargets)) return false;
-      }
+      if (!setIntersects(s, diffSet(dan))) return false;
+      if (pei.length > 0 && !setIntersects(s, diffSet(pei))) return false;
       return true;
     }
     case 'span': {
       // 两码跨：同两码差
       const s = allPairDiffs(nums);
-      const danTargets = diffSet(dan);
-      if (!setIntersects(s, danTargets)) return false;
+      if (!setIntersects(s, diffSet(dan))) return false;
+      if (pei.length > 0 && !setIntersects(s, diffSet(pei))) return false;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 毒胆快速枚举判断：目标集合在循环外预计算一次，10 万次枚举内零分配。
+ * （排列五 D=5 时旧实现每个号码都重建 sumSet/diffSet/pairGroup，是切彩种卡死的主因）
+ * 语义与 matchFilter 完全一致。
+ */
+function matchFilterFast(
+  type: string,
+  nums: number[],
+  dan: number[],
+  pei: number[],
+  danPair: Set<number>,
+  peiPair: Set<number>,
+  danSums: Set<number>,
+  peiSums: Set<number>,
+  danDiffs: Set<number>,
+  peiDiffs: Set<number>,
+): boolean {
+  const n = nums.length;
+  switch (type) {
+    case 'draw': {
+      let ok = false;
+      for (let a = 0; a < dan.length && !ok; a += 1) {
+        const d = dan[a];
+        for (let k = 0; k < n; k += 1) if (nums[k] === d) { ok = true; break; }
+      }
+      if (!ok) return false;
       if (pei.length > 0) {
-        const peiTargets = diffSet(pei);
-        if (!setIntersects(s, peiTargets)) return false;
+        let ok2 = false;
+        for (let a = 0; a < pei.length && !ok2; a += 1) {
+          const q = pei[a];
+          for (let k = 0; k < n; k += 1) if (nums[k] === q) { ok2 = true; break; }
+        }
+        if (!ok2) return false;
+      }
+      return true;
+    }
+    case 'pair': {
+      let ok = false;
+      for (let k = 0; k < n && !ok; k += 1) if (danPair.has(nums[k])) ok = true;
+      if (!ok) return false;
+      if (peiPair.size > 0) {
+        let ok2 = false;
+        for (let k = 0; k < n && !ok2; k += 1) if (peiPair.has(nums[k])) ok2 = true;
+        if (!ok2) return false;
+      }
+      return true;
+    }
+    case 'sum': {
+      let ok = false;
+      for (let i = 0; i < n && !ok; i += 1)
+        for (let j = i + 1; j < n; j += 1)
+          if (danSums.has((nums[i] + nums[j]) % 10)) { ok = true; break; }
+      if (!ok) return false;
+      if (peiSums.size > 0) {
+        let ok2 = false;
+        for (let i = 0; i < n && !ok2; i += 1)
+          for (let j = i + 1; j < n; j += 1)
+            if (peiSums.has((nums[i] + nums[j]) % 10)) { ok2 = true; break; }
+        if (!ok2) return false;
+      }
+      return true;
+    }
+    case 'diff':
+    case 'span': {
+      let ok = false;
+      for (let i = 0; i < n && !ok; i += 1)
+        for (let j = i + 1; j < n; j += 1)
+          if (danDiffs.has(Math.abs(nums[i] - nums[j]))) { ok = true; break; }
+      if (!ok) return false;
+      if (peiDiffs.size > 0) {
+        let ok2 = false;
+        for (let i = 0; i < n && !ok2; i += 1)
+          for (let j = i + 1; j < n; j += 1)
+            if (peiDiffs.has(Math.abs(nums[i] - nums[j]))) { ok2 = true; break; }
+        if (!ok2) return false;
       }
       return true;
     }
@@ -649,10 +720,19 @@ export default function AnalyzeScreen() {
     }
     if (tab === 'dan') {
       if (dan.length === 0) return { kind: 'set', codes: new Set() };
-      // 按类型筛选全部 10^D 个号码（D=位数，排列五=5 位也正确）
+      // 目标集合循环外预计算一次；D=5（排列五）10 万次枚举内零分配
+      const danPair = new Set<number>();
+      for (const d of dan) for (const x of pairGroup(d)) danPair.add(x);
+      const peiPair = new Set<number>();
+      for (const q of pei) for (const x of pairGroup(q)) peiPair.add(x);
+      const dSums = sumSet(dan);
+      const pSums = pei.length > 0 ? sumSet(pei) : EMPTY_SET;
+      const dDiffs = diffSet(dan);
+      const pDiffs = pei.length > 0 ? diffSet(pei) : EMPTY_SET;
       const codes = new Set<string>();
       eachNumber(DD, (nums) => {
-        if (matchFilter(type, nums, dan, pei)) codes.add(nums.join(''));
+        if (matchFilterFast(type, nums, dan, pei, danPair, peiPair, dSums, pSums, dDiffs, pDiffs))
+          codes.add(nums.join(''));
       });
       return { kind: 'set', codes };
     }
@@ -2775,6 +2855,11 @@ export default function AnalyzeScreen() {
                   if (!g.enabled) return;
                   setGameId(g.id);
                   setGameMenuOpen(false);
+                  // 切彩种：清同屏/同屏格状态并收起抽屉，避免旧目标在新彩种下重算卡顿
+                  setCompareTargets(null);
+                  setFocusedIdx(null);
+                  resetCellUi();
+                  setPickExpanded(false);
                 }}
                 style={[styles.modalOption, { opacity: g.enabled ? 1 : 0.4 }]}
               >

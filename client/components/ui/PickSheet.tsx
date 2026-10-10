@@ -67,15 +67,25 @@ export function PickSheet({
   const { height: screenH, width: screenW } = useWindowDimensions();
 
   /**
-   * 抽屉总高：竖屏取屏高 60%、横屏取 82%（横屏屏矮，占比要高些才放得下表单），
-   * 再扣掉底部避让（图型栏 + 安全区）。官方参考图展开态约占屏一半多。
+   * 抽屉总高（满屏态）：屏高 88% 扣掉底部避让（图型栏 + 安全区）。
+   * 官方参考图满屏态约占 88%，悬停/收起由吸附点控制。
    */
-  const sheetH = useMemo(() => {
-    const ratio = screenW > screenH ? 0.82 : 0.6;
-    return Math.max(200, Math.round(screenH * ratio) - bottomOffset);
-  }, [screenW, screenH, bottomOffset]);
-  /** translateY = 0 表示完全展开；= collapsedY 表示只露把手 */
+  const sheetH = useMemo(
+    () => Math.max(200, Math.round(screenH * 0.88) - bottomOffset),
+    [screenH, bottomOffset],
+  );
+  /** translateY = 0 表示满屏；= hoverY 悬停；= collapsedY 只露把手 */
   const collapsedY = Math.max(0, sheetH - PEEK_H);
+  /** 悬停态：露出抽屉上半部约 45%（分组行 + 首屏表单） */
+  const hoverY = useMemo(
+    () => Math.max(0, Math.min(collapsedY - 1, Math.round(sheetH * 0.55))),
+    [sheetH, collapsedY],
+  );
+  /** 三个吸附点（translateY 升序） */
+  const snaps = useMemo(() => [0, hoverY, collapsedY], [hoverY, collapsedY]);
+  /** panResponder 里读最新吸附点（避免闭包旧值） */
+  const snapsRef = useRef(snaps);
+  snapsRef.current = snaps;
 
   const ty = useRef(new Animated.Value(collapsedY)).current;
   /** 拖拽开始时的位置，整个手势期间固定不变 */
@@ -100,34 +110,43 @@ export function PickSheet({
         friction: 12,
         useNativeDriver: true,
       }).start();
-      const open = target < collapsedY / 2;
+      // 满屏（translateY=0）才算展开；悬停/收起都算收起态（把手箭头朝上）
+      const open = target === 0;
       if (open !== isOpen.current) {
         isOpen.current = open;
         setOpenView(open);
         onChange?.(open);
       }
     },
-    [ty, collapsedY, onChange],
+    [ty, onChange],
   );
 
   /**
-   * 屏幕旋转 / 底部栏高度变化 → sheetH 变了，
-   * 必须把抽屉重新贴回当前吸附点，否则会停在半空。
+   * 屏幕旋转 / 底部栏高度变化 → 吸附点变了，
+   * 必须把抽屉重新贴回最近的吸附点，否则会停在半空。
    */
   useEffect(() => {
-    const target = isOpen.current ? 0 : collapsedY;
+    const cur = readY();
+    let best = snaps[0];
+    for (const sn of snaps) if (Math.abs(sn - cur) < Math.abs(best - cur)) best = sn;
     ty.stopAnimation();
-    ty.setValue(target);
-    startY.current = target;
-  }, [ty, collapsedY]);
+    ty.setValue(best);
+    startY.current = best;
+    const open = best === 0;
+    if (open !== isOpen.current) {
+      isOpen.current = open;
+      setOpenView(open);
+    }
+  }, [ty, snaps, readY]);
 
-  /** 受控：外部 expanded 变化时滑到对应吸附点 */
+  /** 受控：外部 expanded 变化时滑到对应吸附点（true=满屏，false=收起） */
   useEffect(() => {
     if (expanded === undefined) return;
     if (expanded === isOpen.current) return;
     animateTo(expanded ? 0 : collapsedY);
   }, [expanded, animateTo, collapsedY]);
 
+  /** 三态吸附：收起 ↔ 悬停 ↔ 满屏 */
   const pan = useMemo(
     () =>
       PanResponder.create({
@@ -148,23 +167,37 @@ export function PickSheet({
         },
         onPanResponderRelease: (_e, g) => {
           const cur = startY.current + g.dy;
-          // 位移很小 → 当成点按把手：直接切换展开态
+          const sn = snapsRef.current;
+          // 位移很小 → 当成点按把手：在 三态 里循环（收起→悬停→满屏→收起）
           if (Math.abs(g.dy) < 6 && Math.abs(g.dx) < 6) {
             ty.setOffset(0);
-            animateTo(isOpen.current ? collapsedY : 0);
+            const idx = sn.findIndex((v) => Math.abs(v - readY()) < 1);
+            const next = sn[Math.min(sn.length - 1, (idx < 0 ? 0 : idx) + 1)];
+            animateTo(idx >= sn.length - 1 ? sn[0] : next);
             return;
           }
           let target: number;
           if (Math.abs(g.vy) > VELOCITY_THRESHOLD) {
-            // 甩动：向下甩收起，向上甩展开
-            target = g.vy > 0 ? collapsedY : 0;
+            // 甩动：向下甩到更低吸附点，向上甩到更高吸附点
+            if (g.vy > 0) {
+              target = sn.filter((v) => v > cur + 8).length ? Math.min(...sn.filter((v) => v > cur + 8)) : sn[sn.length - 1];
+            } else {
+              const ups = sn.filter((v) => v < cur - 8);
+              target = ups.length ? Math.max(...ups) : sn[0];
+            }
           } else {
-            target = cur > collapsedY / 2 ? collapsedY : 0;
+            // 过半原则：贴到最近的吸附点
+            target = sn[0];
+            for (const v of sn) if (Math.abs(v - cur) < Math.abs(target - cur)) target = v;
           }
           animateTo(target, g.vy);
         },
         onPanResponderTerminate: () => {
-          animateTo(readY() > collapsedY / 2 ? collapsedY : 0);
+          const cur = readY();
+          let best = snapsRef.current[0];
+          for (const v of snapsRef.current)
+            if (Math.abs(v - cur) < Math.abs(best - cur)) best = v;
+          animateTo(best);
         },
       }),
     [ty, collapsedY, animateTo, readY],
