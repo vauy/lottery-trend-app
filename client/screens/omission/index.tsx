@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '@/components/Screen';
-import { OmissionChart } from '@/components/charts/OmissionChart';
+import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { useLotteryAnalysis, useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { buildOmissionSeries } from '@/lib/lottery/analysis';
 import type { TemperatureStatus } from '@/lib/lottery/types';
@@ -36,6 +36,8 @@ const TEMP_COLOR: Record<TemperatureStatus, string> = {
 
 export default function OmissionScreen() {
   const [selectedDigit, setSelectedDigit] = useState<number | null>(null);
+  // 图表宽度：随容器 onLayout 动态测量，横竖屏均填充不拉伸
+  const [chartW, setChartW] = useState(320);
 
   const { width: screenW, height: screenH } = useWindowDimensions();
   const isLandscape = screenW > screenH;
@@ -147,7 +149,19 @@ export default function OmissionScreen() {
                   label={`胆码 ${activeDigit} 遗漏分析`}
                   right={<Text style={styles.panelMeta}>{records.length} 期</Text>}
                 >
-                  <OmissionChart series={omissionSeries} height={340} />
+                  <View
+                    onLayout={(e) => {
+                      const w = e.nativeEvent.layout.width;
+                      if (w > 0) setChartW(w);
+                    }}
+                  >
+                    <EChartsOmissionChart
+                      series={omissionSeries}
+                      width={chartW}
+                      height={340}
+                      targetLabel={`胆码 ${activeDigit}`}
+                    />
+                  </View>
                 </Panel>
 
                 <Panel label="全号码遗漏汇总（近10期）">

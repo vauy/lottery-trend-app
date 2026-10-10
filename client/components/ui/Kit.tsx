@@ -247,19 +247,38 @@ export function ChartCard({
 
 /* ─────────────── 毒胆同屏网格 .tong-grid ─────────────── */
 
-export function TongGrid({ children }: { children: ReactNode }) {
-  return <View style={styles.tongGrid}>{children}</View>;
+export function TongGrid({
+  children,
+  columns = 1,
+}: {
+  children: ReactNode;
+  /**
+   * 同屏列数。
+   * 竖屏默认 1 列（十行排满 0-9），横屏/宽屏才用 2 列。
+   * 之前写死 2 列导致单格宽度只有 ~48%，但高度固定 88px，
+   * 宽高比失衡把 K 线压扁，波形完全失真。
+   */
+  columns?: number;
+}) {
+  return (
+    <View style={[styles.tongGrid, columns >= 2 && styles.tongGridMulti]}>
+      {children}
+    </View>
+  );
 }
 
 export function TongCell({
   digit,
   children,
+  width,
 }: {
   digit: number | string;
   children: ReactNode;
+  /** 单格宽度（由父级按列数与内容宽度算好后传入，保证宽高比正常） */
+  width?: number;
 }) {
   return (
-    <View style={styles.tongCell}>
+    <View style={[styles.tongCell, width ? { width } : null]}>
       <Text style={styles.tongCellLabel}>{digit}</Text>
       {children}
     </View>
@@ -479,6 +498,8 @@ const styles = StyleSheet.create({
   chipTextOn: { color: semantic.brand, fontWeight: '600' },
 
   chartCard: {
+    alignSelf: 'stretch',
+    width: '100%',
     backgroundColor: semantic.panelBg,
     borderWidth: 1,
     borderColor: semantic.panelBorder,
@@ -494,9 +515,12 @@ const styles = StyleSheet.create({
   chartTitle: { fontSize: fs.xs, color: semantic.textDim, fontWeight: '600' },
   chartMeta: { fontSize: fs.micro, color: semantic.textFaint },
 
-  tongGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  tongGrid: { flexDirection: 'column', gap: 8, alignSelf: 'stretch', width: '100%' },
+  /** 多列（横屏）：两列并排 */
+  tongGridMulti: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
   tongCell: {
-    width: '48%',
+    // 宽度由调用方按列数计算后传入；此处兜底为撑满可用宽度（竖屏一列）
+    alignSelf: 'stretch',
     backgroundColor: semantic.controlBg,
     borderWidth: 1,
     borderColor: semantic.panelBorder,

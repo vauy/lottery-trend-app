@@ -1,164 +1,154 @@
 /**
- * 遗漏K线图 —— 石头剪刀布爬楼梯。
+ * 遗漏K线图 —— 二阶
+ *
+ * 规则：只统计「开出」事件（未开出不落点）
+ * - 开出前的遗漏落在设定范围内 → 阳线（红），长度 = 1/p − 1
+ * - 落在范围外             → 阴线（绿），长度 = −1
+ * - 分数累加成「爬楼梯」走势
+ *
+ * 尺寸全部由 width / height props 驱动，内部不写死宽度。
  */
-import React, { useEffect, useRef } from 'react';
-import { View, ScrollView, useWindowDimensions, Text } from 'react-native';
-import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
+import React, { useMemo } from 'react';
+import {
+  CHART_AXIS_COLOR,
+  CHART_GRID,
+  EChartView,
+  categoryAxis,
+  emptyOption,
+  rawJs,
+  titleGraphic,
+  valueAxis,
+  type EChartOption,
+} from './EChartView';
 import type { TargetPoint } from '@/lib/lottery/targets';
-import { scaleLinear } from './chartUtils';
-import { palette, semantic } from '@/lib/theme';
+import { palette } from '@/lib/theme';
 
-/** 升档 = 热（red）/ 降档 = 冷（cyan） */
-const UP = semantic.hot;
-const DOWN = semantic.cold;
-/** 网格线 / 坐标轴线 */
-const AXIS_COLOR = palette.line;
-const ZERO_COLOR = palette.line;
-/** 坐标刻度文字 */
-const TICK_COLOR = palette.inkFaint;
-/** 标题文字 */
-const TITLE_COLOR = palette.inkDim;
+/** 阳线：范围内开出（红涨） */
+const UP = palette.red;
+/** 阴线：范围外开出（绿跌） */
+const DOWN = palette.accent;
 
-const BAR_W = 4;
-const COL_SPACING = 6;
-const RIGHT_PAD = 120;
+const DEFAULT_RANGE: [number, number] = [1, 20];
 
-type KBar = { issue: string; x: number; o: number; c: number; isRed: boolean };
-
-function calcDelta(prevMiss: number, theoryMiss: number): { delta: number; isRed: boolean } {
-  if (theoryMiss <= 0) return { delta: 1, isRed: true };
-  if (prevMiss <= theoryMiss) return { delta: 1, isRed: true };
-  const level = Math.ceil(prevMiss / theoryMiss) - 1;
-  const mult = ((level - 1) % 3) + 1;
-  return { delta: -mult, isRed: false };
+export interface OmissionKChartProps {
+  /** 目标序列（正序：index 0 最旧） */
+  series: TargetPoint[];
+  /** 容器宽度（由外部布局测量驱动） */
+  width: number;
+  /** 容器高度 */
+  height: number;
+  /** 遗漏范围 [min, max]（含端点），默认 [1, 20] */
+  range?: [number, number];
+  /** 理论概率 p，用于阳线长度 1/p − 1，默认 0.1 */
+  probability?: number;
+  /** 蜡烛实体宽度（px）；不传则按 宽度/点数 自适应 */
+  barWidth?: number;
+  /** 最多渲染点数（保留最新），默认 200 */
+  maxPoints?: number;
+  /** 顶部标题 */
+  title?: string;
 }
 
 export function OmissionKChart({
   series,
-  height = 300,
-  width: explicitWidth,
-  theoryMiss = 0,
-  titleColor,
-}: {
-  series: TargetPoint[];
-  height?: number;
-  width?: number;
-  theoryMiss?: number;
-  titleColor?: string;
-}) {
-  const { width: screenW } = useWindowDimensions();
-  const width = explicitWidth ?? screenW;
-  const scrollRef = useRef<ScrollView>(null);
+  width,
+  height,
+  range = DEFAULT_RANGE,
+  probability = 0.1,
+  barWidth,
+  maxPoints = 200,
+  title,
+}: OmissionKChartProps) {
+  const option = useMemo<EChartOption>(() => {
+    const [rMin, rMax] = range;
+    const p = probability > 0 && probability < 1 ? probability : 0.1;
+    const upLen = 1 / p - 1;
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: false });
-    }, 50);
-    return () => clearTimeout(t);
-  }, [series.length]);
-
-  if (series.length === 0) {
-    return (
-      <View style={{ height: 120, justifyContent: 'center', alignItems: 'center' }}>
-        <Text className="text-muted text-xs">暂无数据</Text>
-      </View>
-    );
-  }
-
-  const bars: KBar[] = [];
-  let score = 0;
-  for (let i = 0; i < series.length; i += 1) {
-    if (series[i].hit === 1) {
+    const all: { o: number; c: number; up: boolean; issue: string }[] = [];
+    let score = 0;
+    for (let i = 0; i < series.length; i += 1) {
+      if (series[i].hit !== 1) continue;
       const prevMiss = i === 0 ? 0 : series[i - 1].omission;
-      const { delta, isRed } = calcDelta(prevMiss, theoryMiss);
-      bars.push({ issue: series[i].issue, x: i, o: score, c: score + delta, isRed });
-      score = score + delta;
+      const inRange = prevMiss >= rMin && prevMiss <= rMax;
+      const delta = inRange ? upLen : -1;
+      all.push({
+        o: score,
+        c: score + delta,
+        up: inRange,
+        issue: series[i].issue,
+      });
+      score += delta;
     }
-  }
 
-  if (bars.length === 0) {
-    return (
-      <View style={{ height: 120, justifyContent: 'center', alignItems: 'center' }}>
-        <Text className="text-muted text-xs">无开出记录</Text>
-      </View>
-    );
-  }
+    const bars = all.length > maxPoints ? all.slice(-maxPoints) : all;
+    const n = bars.length;
+    if (n === 0) return emptyOption('无开出记录');
 
-  // 统计信息
-  const curMiss = series.length > 0 ? series[series.length - 1].omission : 0;
-  const maxMiss = Math.max(...series.map((p) => p.omission), 0);
-  const avgMiss =
-    series.length > 0
-      ? series.reduce((a, b) => a + b.omission, 0) / series.length
-      : 0;
+    const allY: number[] = [0];
+    for (const b of bars) allY.push(b.o, b.c);
+    const lo = Math.min(...allY);
+    const hi = Math.max(...allY);
+    const pad = (hi - lo || 1) * 0.08;
 
-  const allY: number[] = [];
-  for (const b of bars) allY.push(b.o, b.c);
-  const yMin = Math.min(0, ...allY);
-  const yMax = Math.max(0, ...allY);
-  const range = yMax - yMin || 1;
-  const yLo = yMin - range * 0.08;
-  const yHi = yMax + range * 0.08;
+    const barW = barWidth ?? Math.max(1.5, Math.min(7, (width / n) * 0.6));
 
-  const compact = height < 150;
-  const pad = compact
-    ? { left: 26, right: 8, top: 4, bottom: 14 }
-    : { left: 36, right: 12, top: 10, bottom: 22 };
-  const fontTick = compact ? 6 : 8;
-  const fontX = compact ? 6 : 8;
-  const innerH = Math.max(80, height - pad.top - pad.bottom);
-  const totalHeight = height;
+    const renderItem = rawJs(`function (params, api) {
+      var idx = api.value(0);
+      var o = api.value(1);
+      var c = api.value(2);
+      var x = api.coord([idx, 0])[0];
+      var yO = api.coord([idx, o])[1];
+      var yC = api.coord([idx, c])[1];
+      var halfW = ${barW} / 2;
+      var top = Math.min(yO, yC);
+      var h = Math.max(1.5, Math.abs(yC - yO));
+      return {
+        type: 'rect',
+        shape: { x: x - halfW, y: top, width: ${barW}, height: h },
+        style: { fill: api.visual('color') }
+      };
+    }`);
 
-  const naturalW = pad.left + bars.length * COL_SPACING + RIGHT_PAD;
-  const chartWidth = Math.max(width, naturalW);
-  const xForBar = (k: number) => pad.left + COL_SPACING * (k + 0.5);
-  const yScale = scaleLinear([yLo, yHi], [pad.top + innerH, pad.top]);
+    const step = Math.max(1, Math.ceil(n / 12));
+    const labels = bars.map((b, i) => (i % step === 0 ? b.issue.slice(-3) : ''));
 
-  const xLabelStep = Math.max(1, Math.round(60 / COL_SPACING));
-  const yTicks = [0, 0.5, 1].map((r) => yLo + (yHi - yLo) * r);
+    return {
+      backgroundColor: 'transparent',
+      animation: false,
+      grid: { ...CHART_GRID, top: height < 160 ? 18 : 24 },
+      graphic: titleGraphic(title),
+      xAxis: categoryAxis(labels),
+      yAxis: valueAxis(lo - pad, hi + pad),
+      series: [
+        {
+          type: 'custom',
+          renderItem,
+          data: bars.map((b, i) => ({
+            value: [i, b.o, b.c],
+            itemStyle: { color: b.up ? UP : DOWN },
+          })),
+          z: 5,
+        },
+        {
+          // 零轴参考线
+          type: 'line',
+          data: [],
+          symbol: 'none',
+          silent: true,
+          markLine: {
+            silent: true,
+            symbol: ['none', 'none'],
+            lineStyle: { color: CHART_AXIS_COLOR, width: 1 },
+            label: { show: false },
+            data: [{ yAxis: 0 }],
+          },
+          z: 2,
+        },
+      ],
+    };
+  }, [series, width, height, range, probability, barWidth, maxPoints, title]);
 
-  return (
-    <View style={{ width, height: totalHeight, position: 'relative' }}>
-      {/* 悬浮标题 */}
-      <View pointerEvents="none" style={{ position: 'absolute', top: 2, left: 0, right: 0, alignItems: 'center', zIndex: 10 }}>
-        <Text style={{ fontSize: 10, color: titleColor ?? TITLE_COLOR }}>
-          遗漏K线（历史最大:{maxMiss} 平均:{avgMiss.toFixed(2)} 理论:{theoryMiss.toFixed(2)} 当前:{curMiss}）
-        </Text>
-      </View>
-      <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator bounces={false}>
-        <Svg width={chartWidth} height={totalHeight}>
-          {yTicks.map((v, idx) => {
-            const y = yScale(v);
-            return (
-              <React.Fragment key={`g-${idx}`}>
-                <Line x1={pad.left} y1={y} x2={chartWidth - pad.right} y2={y} stroke={AXIS_COLOR} strokeWidth={1} />
-                <SvgText x={pad.left - 3} y={y + 3} fontSize={fontTick} fill={TICK_COLOR} textAnchor="end">
-                  {v.toFixed(0)}
-                </SvgText>
-              </React.Fragment>
-            );
-          })}
-
-          {bars.map((b, i) => {
-            const cx = xForBar(i);
-            const color = b.isRed ? UP : DOWN;
-            const yO = yScale(b.o);
-            const yC = yScale(b.c);
-            const bodyTop = Math.min(yO, yC);
-            const bodyH = Math.max(1.5, Math.abs(yC - yO));
-            return <Rect key={`k-${i}`} x={cx - BAR_W / 2} y={bodyTop} width={BAR_W} height={bodyH} fill={color} />;
-          })}
-
-          {bars.map((b, i) =>
-            i % xLabelStep === 0 || i === bars.length - 1 ? (
-              <SvgText key={`x-${i}`} x={xForBar(i)} y={totalHeight - 6}
-                fontSize={fontTick} fill={TICK_COLOR} textAnchor="middle">
-                {b.issue.slice(-3)}
-              </SvgText>
-            ) : null,
-          )}
-        </Svg>
-      </ScrollView>
-    </View>
-  );
+  return <EChartView option={option} width={width} height={height} />;
 }
+
+export default OmissionKChart;

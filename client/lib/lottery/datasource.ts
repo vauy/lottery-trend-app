@@ -37,6 +37,7 @@ const SOURCE_MAP: Record<string, string> = {
   fc3d: '3d_asc.txt',
   pl3: 'pl3_asc.txt',
   pl5: 'pl5_asc.txt',
+  kl8: 'kl8_asc.txt',
 };
 const BASE_URL = 'https://data.17500.cn';
 
@@ -54,16 +55,12 @@ export function parseDate(raw: string): string {
  * 从 17500 抓取全量历史开奖（正序）。
  */
 export async function fetchFullHistory(gameId: string): Promise<DrawRecord[]> {
-  // 快乐8 走中彩网 API
-  if (gameId === 'kl8') {
-    return fetchKl8History();
-  }
   const fileName = SOURCE_MAP[gameId];
   if (!fileName) {
     throw new Error(`未配置的数据源：${gameId}`);
   }
 
-  // 首选：17500
+  // 首选：17500（四个彩种统一走 data.17500.cn）
   try {
     const url = `${BASE_URL}/${fileName}`;
     const resp = await fetch(url, {
@@ -76,16 +73,19 @@ export async function fetchFullHistory(gameId: string): Promise<DrawRecord[]> {
     });
     if (resp.ok) {
       const text = await resp.text();
-      const parsed = parse17500Text(text);
+      const parsed = gameId === 'kl8' ? parseKl8Text(text) : parse17500Text(text);
       if (parsed.length > 100) return parsed;
     }
   } catch {
     // 17500 失败，走备用
   }
 
-  // 备用：福彩3D 走中彩网
+  // 备用：福彩3D / 快乐8 走中彩网 API
   if (gameId === 'fc3d') {
     return fetch3dFromCwl();
+  }
+  if (gameId === 'kl8') {
+    return fetchKl8History();
   }
 
   throw new Error('所有数据源均不可用');
@@ -176,6 +176,32 @@ export function parse17500Text(text: string): DrawRecord[] {
       parseInt(parts[4], 10),
     ];
     if (nums.some((n) => Number.isNaN(n))) continue;
+    out.push({ issue, date, nums });
+  }
+  // 文件本身就是正序（最旧在前），无需反转
+  return out;
+}
+
+/**
+ * 解析 17500 快乐8 文本格式：
+ *   期号 日期 号码1 号码2 ... 号码20
+ * 与 parse17500Text 的差别：快乐8 每期开 20 个号码（1-80），且不定位。
+ */
+export function parseKl8Text(text: string): DrawRecord[] {
+  const out: DrawRecord[] = [];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(/\s+/);
+    // 期号 + 日期 + 20 个号码
+    if (parts.length < 22) continue;
+    const issue = parts[0];
+    const date = parseDate(parts[1]);
+    const nums = parts.slice(2, 22).map((x) => parseInt(x, 10));
+    // 快乐8 号码范围 1-80，且当期内不得重复
+    if (nums.some((n) => Number.isNaN(n) || n < 1 || n > 80)) continue;
+    if (new Set(nums).size !== 20) continue;
     out.push({ issue, date, nums });
   }
   // 文件本身就是正序（最旧在前），无需反转

@@ -21,9 +21,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/components/Screen';
 import { EChartsFreqKChart } from '@/components/charts/EChartsFreqKChart';
 import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
-import { OmissionChart } from '@/components/charts/OmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
-import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
+// 注：原 Skia 版原始值走势图已改用 EChartsRawChart（WebView 渲染），
+// 以保证 App 可在 Expo Go（Termux 热更新）运行，不依赖自定义原生模块。
+import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
 import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
@@ -294,6 +295,25 @@ export default function AnalyzeScreen() {
   const [bai, setBai] = useState<number[]>([]);
   const [shi, setShi] = useState<number[]>([]);
   const [ge, setGe] = useState<number[]>([]);
+  // 排列五：万位 / 千位
+  const [wan, setWan] = useState<number[]>([]);
+  const [qian, setQian] = useState<number[]>([]);
+
+  /** 定位（复式倍数）按位选择的位置槽：3 位=百/十/个，5 位=万/千/百/十/个 */
+  const posSlots = useMemo(() => {
+    const slots: { key: string; label: string; arr: number[]; setArr: (v: number[]) => void }[] = [
+      { key: 'bai', label: '百位', arr: bai, setArr: setBai },
+      { key: 'shi', label: '十位', arr: shi, setArr: setShi },
+      { key: 'ge', label: '个位', arr: ge, setArr: setGe },
+    ];
+    if (game.digitCount >= 5) {
+      slots.unshift(
+        { key: 'qian', label: '千位', arr: qian, setArr: setQian },
+        { key: 'wan', label: '万位', arr: wan, setArr: setWan },
+      );
+    }
+    return slots;
+  }, [game.digitCount, bai, shi, ge, wan, qian]);
   const [multiMode, setMultiMode] = useState<'pos' | 'nopos'>('pos');
   const [noposNums, setNoposNums] = useState<number[]>([]);
   const [hejiKey, setHejiKey] = useState<string>('sum');
@@ -382,7 +402,7 @@ export default function AnalyzeScreen() {
       else if (tab === 'pos') digitsForShape = [posDigit];
       else if (tab === 'multi') {
         digitsForShape = multiMode === 'pos'
-          ? [...new Set([...bai, ...shi, ...ge])]
+          ? [...new Set(posSlots.flatMap((s) => s.arr))]
           : [...noposNums];
       }
       else digitsForShape = shapeDigits;
@@ -454,11 +474,15 @@ export default function AnalyzeScreen() {
     if (tab === 'pos') return { kind: 'digit', digit: posDigit, pos };
     if (tab === 'multi') {
       if (multiMode === 'pos') {
-        if (bai.length === 0 || shi.length === 0 || ge.length === 0)
-          return { kind: 'set', codes: new Set() };
-        const codes = new Set<string>();
-        for (const a of bai) for (const b of shi) for (const c of ge) codes.add(`${a}${b}${c}`);
-        return { kind: 'set', codes };
+        if (posSlots.some((s) => s.arr.length === 0)) return { kind: 'set', codes: new Set() };
+        // 按位置做笛卡尔积：3 位 → 百十百；5 位 → 万千百十全
+        let codes: string[] = [''];
+        for (const s of posSlots) {
+          const next: string[] = [];
+          for (const prefix of codes) for (const d of s.arr) next.push(prefix + String(d));
+          codes = next;
+        }
+        return { kind: 'set', codes: new Set(codes) };
       } else {
         // 不定位复式：每位从 noposNums 里选，可重复
         if (noposNums.length === 0) return { kind: 'set', codes: new Set() };
@@ -472,7 +496,7 @@ export default function AnalyzeScreen() {
     if (tab === 'amp') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     return { kind: 'set', codes: new Set() };
   }, [tab, type, externalCodes, shapeMainMode, shapeFilters, shapeDigits, dan, commonDigit, commonMode, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
-    bai, shi, ge, multiMode, noposNums, hejiKey, hejiValue]);
+    bai, shi, ge, wan, qian, posSlots, multiMode, noposNums, hejiKey, hejiValue]);
 
   const codesCount = useMemo(() => {
     if (target.kind === 'set') return target.codes.size;
@@ -577,7 +601,21 @@ export default function AnalyzeScreen() {
   const chartH = isLandscape ? chartSize.hLandscape : chartSize.h;
   const chartColW = isLandscape ? Math.floor((contentW - space.lg) / 2) : contentW;
   const chartW = Math.max(160, chartColW - 24);
-  const tongW = Math.max(120, Math.floor(contentW * 0.48) - 12);
+
+  /**
+   * 毒胆同屏布局。
+   * 竖屏：1 列 × 10 行（0-9 竖着排），单格撑满内容宽度；
+   * 横屏/宽屏：2 列，单格取半宽。
+   * 单格高度独立给足，避免「宽度大、高度小」把 K 线压扁失真。
+   */
+  const tongColumns = isLandscape && width >= 900 ? 2 : 1;
+  const tongGap = 8;
+  const tongW = Math.max(
+    160,
+    Math.floor((contentW - (tongColumns - 1) * tongGap) / tongColumns) - 14,
+  );
+  /** 单格内图表高度：竖屏单列给得更高，形态才舒展 */
+  const tongH = isLandscape ? chartSize.tongCell : 140;
 
   // 图表可用高度（同屏放大 / 振幅图用）
   const TOP_BAR_H = topCollapsed ? 30 : 180;
@@ -1200,9 +1238,9 @@ export default function AnalyzeScreen() {
 
       {multiMode === 'pos' ? (
         <>
-          {renderDigitRow('百位', bai, setBai)}
-          {renderDigitRow('十位', shi, setShi)}
-          {renderDigitRow('个位', ge, setGe)}
+          {posSlots.map((s) => (
+            <View key={s.key}>{renderDigitRow(s.label, s.arr, s.setArr)}</View>
+          ))}
         </>
       ) : (
         renderDigitRow('号码', noposNums, setNoposNums)
@@ -1338,17 +1376,8 @@ export default function AnalyzeScreen() {
   /** 数据 / 期数面板（原底部工具栏） */
   const renderDataBar = () => (
     <>
-      <Field caption="彩种 / 周期">
-        <View style={styles.chipRow}>
-          {[{ id: 'fc3d', label: '福彩3D' }, { id: 'pl3', label: '排列3' }].map((g) => (
-            <Chip
-              key={g.id}
-              label={g.label}
-              active={gameId === g.id}
-              onPress={() => setGameId(g.id)}
-            />
-          ))}
-        </View>
+      {/* 彩种切换已由顶部 gamebar 提供，这里不再重复放一份 */}
+      <Field caption="周期">
         <View style={styles.chipRow}>
           {[1, 2, 3, 5, 10].map((p) => (
             <Chip key={`pd-${p}`} label={String(p)} active={period === p} onPress={() => setPeriod(p)} />
@@ -1442,14 +1471,14 @@ export default function AnalyzeScreen() {
     return null;
   };
 
-  /** 毒胆同屏：原型 .tong-grid 两列；点按放大单图 */
+  /** 毒胆同屏：竖屏 1 列 × 10 行；点按放大单图 */
   const renderCompare = () => {
     if (!compareTargets || compareTargets.length === 0) return null;
     const list = compareTargets
       .map((ct, idx) => ({ ct, idx }))
       .filter(({ idx }) => focusedIdx === null || focusedIdx === idx);
 
-    // 满屏模式：单张大图
+    // 满屏模式：单张大图（水平居中）
     if (focusedIdx !== null && list.length > 0) {
       const { ct } = list[0];
       const sliceN = records.length;
@@ -1459,19 +1488,21 @@ export default function AnalyzeScreen() {
       const m = chartModes[0]; // 同屏只显示第一种图
       return (
         <>
-          <ChartCard title={getTargetLabel(ct)} meta={CHART_META[m].title}>
-            <Pressable onPress={() => setFocusedIdx(null)}>
-              {renderChart(
-                m,
-                chartW,
-                Math.max(chartSize.h * 2, availH - 40),
-                s,
-                oSeries,
-                tMiss,
-                getTargetLabel(ct),
-              )}
-            </Pressable>
-          </ChartCard>
+          <View style={styles.chartCenter}>
+            <ChartCard title={getTargetLabel(ct)} meta={CHART_META[m].title}>
+              <Pressable onPress={() => setFocusedIdx(null)}>
+                {renderChart(
+                  m,
+                  chartW,
+                  Math.max(chartSize.h * 2, availH - 40),
+                  s,
+                  oSeries,
+                  tMiss,
+                  getTargetLabel(ct),
+                )}
+              </Pressable>
+            </ChartCard>
+          </View>
           <View style={{ height: space.md }} />
           <View style={styles.chipRow}>
             <Chip
@@ -1485,7 +1516,7 @@ export default function AnalyzeScreen() {
     }
 
     return (
-      <TongGrid>
+      <TongGrid columns={tongColumns}>
         {list.map(({ ct, idx }) => {
           const sliceN = Math.min(records.length, 300);
           const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
@@ -1495,9 +1526,9 @@ export default function AnalyzeScreen() {
           const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
           const m = chartModes[0]; // 同屏只显示第一种图
           return (
-            <TongCell key={idx} digit={label}>
+            <TongCell key={idx} digit={label} width={tongColumns === 1 ? undefined : tongW}>
               <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
-                {renderChart(m, tongW, chartSize.tongCell, s, oSeries, tMiss, getTargetLabel(ct))}
+                {renderChart(m, tongW, tongH, s, oSeries, tMiss, getTargetLabel(ct))}
               </Pressable>
             </TongCell>
           );
@@ -1658,20 +1689,22 @@ export default function AnalyzeScreen() {
 
           {/* 振幅专用图 */}
           {tab === 'amp' && (
-            <ChartCard
-              title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
-              meta={`≤ ${ampMax}`}
-            >
-              {rawData && (
-                <SkiaRawChart
-                  data={rawData}
-                  height={Math.max(chartSize.h, availH - 8)}
-                  width={chartW}
-                  title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
-                  highlightValue={ampMax}
-                />
-              )}
-            </ChartCard>
+            <View style={styles.chartCenter}>
+              <ChartCard
+                title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                meta={`≤ ${ampMax}`}
+              >
+                {rawData && (
+                  <EChartsRawChart
+                    data={rawData}
+                    height={Math.max(chartSize.h, availH - 8)}
+                    width={chartW}
+                    title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                    yMax={ampMax}
+                  />
+                )}
+              </ChartCard>
+            </View>
           )}
 
           {loading ? (
@@ -1690,7 +1723,13 @@ export default function AnalyzeScreen() {
               <Text style={styles.hint}>请在上方选择号码</Text>
             </View>
           ) : (
-            <View style={[styles.chartsGrid, isLandscape && styles.chartsGridLandscape]}>
+            <View
+              style={[
+                styles.chartsGrid,
+                isLandscape && styles.chartsGridLandscape,
+                styles.chartCenter,
+              ]}
+            >
               {chartModes.map((m) => (
                 <View key={m} style={[styles.chartCell, isLandscape && { width: chartColW }]}>
                   <ChartCard title={CHART_META[m].title} meta={CHART_META[m].meta}>
@@ -1899,7 +1938,11 @@ const styles = StyleSheet.create({
 
   /* content */
   content: { flex: 1, backgroundColor: semantic.contentBg },
+  // 注意：这里不能加 alignItems:'center'，否则 Panel 等子块会收缩到内容宽度而不再撑满。
+  // 图表居中由 chartCenter 单独负责。
   contentInner: { padding: space.lg, gap: space.lg },
+  /** 图表卡片/同屏网格：占满内容宽度但整体居中 */
+  chartCenter: { width: '100%', alignItems: 'center' },
   panelRight: { fontSize: fs.micro, color: semantic.textDim },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   rowBetween: {
