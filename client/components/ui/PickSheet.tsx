@@ -64,13 +64,16 @@ export function PickSheet({
   expanded,
   bottomOffset = 0,
 }: PickSheetProps) {
-  const { height: screenH } = useWindowDimensions();
+  const { height: screenH, width: screenW } = useWindowDimensions();
 
-  /** 抽屉总高：屏幕 88%，再扣掉底部操作栏 */
-  const sheetH = useMemo(
-    () => Math.max(200, Math.round(screenH * 0.88) - bottomOffset),
-    [screenH, bottomOffset],
-  );
+  /**
+   * 抽屉总高：竖屏取屏高 60%、横屏取 82%（横屏屏矮，占比要高些才放得下表单），
+   * 再扣掉底部避让（图型栏 + 安全区）。官方参考图展开态约占屏一半多。
+   */
+  const sheetH = useMemo(() => {
+    const ratio = screenW > screenH ? 0.82 : 0.6;
+    return Math.max(200, Math.round(screenH * ratio) - bottomOffset);
+  }, [screenW, screenH, bottomOffset]);
   /** translateY = 0 表示完全展开；= collapsedY 表示只露把手 */
   const collapsedY = Math.max(0, sheetH - PEEK_H);
 

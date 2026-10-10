@@ -324,13 +324,21 @@ export default function AnalyzeScreen() {
   const [shapeDigits, setShapeDigits] = useState<number[]>([]);
   const game = useGame(gameId);
 
+  const [chartModes, setChartModes] = useState<ChartMode[]>(['freq']);
+  /** 分布图形口径：freq=近N期出现次数 / omission=当前遗漏 */
+  const [kl8HeatMode, setKl8HeatMode] = useState<Kl8HeatMode>('freq');
+  /** 当前主图型（同屏/多图时以第一张为准）——周期/窗口记忆的键之一 */
+  const mainMode = chartModes[0] ?? 'freq';
+
   const [countInput, setCountInput] = useState('500');
   const [countMap, setCountMap] = useState<Record<string, number>>({
     common: 500, dan: 500, dantuo: 500, pos: 500, multi: 500,
     heji: 500, amp: 80, random1: 500, random2: 500, group: 500,
     combo: 200, fushi: 200, kl8seq: 200, kl8dt: 200,
   });
-  const loadCount = countMap[tab] ?? 500;
+  /** 记忆键：页签 + 图型 —— 不同图表各自记住自己的分析窗口与周期 */
+  const memKey = `${tab}:${mainMode}`;
+  const loadCount = countMap[memKey] ?? countMap[tab] ?? 500;
 
   const { records, allRecords, loading, refreshing, error, source, refresh } = useLotteryHistory(
     game.id, loadCount,
@@ -426,7 +434,11 @@ export default function AnalyzeScreen() {
   const [ampKey, setAmpKey] = useState<string>('sumAmp');
   const [ampMax, setAmpMax] = useState(9);
   const [hejiValue, setHejiValue] = useState(13);
-  const [period, setPeriod] = useState(1);
+  /** 周期按「页签+图型」分别记忆 */
+  const [periodMap, setPeriodMap] = useState<Record<string, number>>({});
+  const period = periodMap[`${tab}:${mainMode}`] ?? 1;
+  const setPeriod = (p: number) =>
+    setPeriodMap((v) => ({ ...v, [`${tab}:${mainMode}`]: p }));
   /** 周期基准（官方《周期K线》1.1 左对齐 / 1.2 右对齐） */
   const [cycleAlign, setCycleAlign] = useState<CycleAlign>('left');
   /** 出次图/遗漏型的分段周期（步长） */
@@ -435,9 +447,6 @@ export default function AnalyzeScreen() {
   const [drawBack, setDrawBack] = useState(0);
   /** 遗漏和口径：直选(定位胆) / 组选(不定位胆) / 全胆 */
   const [missSumKind, setMissSumKind] = useState<'direct' | 'group' | 'all'>('direct');
-  /** 分布图形口径：freq=近N期出现次数 / omission=当前遗漏 */
-  const [kl8HeatMode, setKl8HeatMode] = useState<Kl8HeatMode>('freq');
-  const [chartModes, setChartModes] = useState<ChartMode[]>(['freq']);
   const [compareTargets, setCompareTargets] = useState<Target[] | null>(null);
   /** 同屏每格图型（idx → ChartMode），未设置的跟随 chartModes[0] */
   const [cellModes, setCellModes] = useState<Record<number, ChartMode>>({});
@@ -850,7 +859,7 @@ export default function AnalyzeScreen() {
   const applyCount = () => {
     const n = parseInt(countInput, 10);
     if (!Number.isNaN(n) && n >= 50 && n <= 10000) {
-      setCountMap((prev) => ({ ...prev, [tab]: n }));
+      setCountMap((prev) => ({ ...prev, [memKey]: n }));
     } else {
       setCountInput(String(loadCount));
     }
@@ -1104,15 +1113,16 @@ export default function AnalyzeScreen() {
     );
   };
 
-  /** 子页签切换（保留原 tab 切换副作用） */
+  /** 子页签切换（保留原 tab 切换副作用；输入框由 loadCount effect 统一恢复） */
   const onTabChange = (t: TabId) => {
     setTab(t);
-    setCountInput(String(countMap[t] ?? 500));
     setCompareTargets(null);
-    if (t === 'amp') {
-      setCountInput(String(countMap.amp ?? 80));
-    }
   };
+
+  /** 切页签 / 切图型 / 应用窗口后，输入框恢复为该「页签+图型」记住的窗口值 */
+  useEffect(() => {
+    setCountInput(String(loadCount));
+  }, [loadCount]);
 
   /**
    * 抽屉分组页签（对齐参考图「常用 / 系统 / 定制」三段）。
@@ -2866,6 +2876,24 @@ export default function AnalyzeScreen() {
                 />
               </>
             )}
+            <View style={styles.modalDivider} />
+            <View style={styles.chipRow}>
+              {/* 组号（原底部 tab 入口移到这里）：按当前彩种跳对应组号/缩水屏 */}
+              <Chip
+                label="组号"
+                active={false}
+                onPress={() => {
+                  setMoreMenuOpen(false);
+                  const path =
+                    gameId === 'pl5'
+                      ? '/(tabs)/pl5-shrink'
+                      : gameId === 'kl8'
+                        ? '/(tabs)/kl8-shrink'
+                        : '/(tabs)/shrink';
+                  router.push({ pathname: path as never, params: {} });
+                }}
+              />
+            </View>
             <View style={styles.modalDivider} />
             <View style={[styles.chipRow, { justifyContent: 'flex-end' }]}>
               <Chip label="出图" active onPress={handleExport} />
