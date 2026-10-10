@@ -604,7 +604,15 @@ export default function AnalyzeScreen() {
 
   // ============ 响应式：横屏 / 宽屏 ============
   const isLandscape = width >= 860 || width > height;
-  const contentW = Math.max(240, width - space.lg * 2);
+  /**
+   * 内容区左右留白。
+   * 原来竖屏横屏都写死 16dp，加上卡片内边距 12dp 和 ECharts grid 的
+   * left 36 / right 60，一条 ~500dp 宽的图表实际只剩不到 380dp 能画，
+   * 左右各留出一大条空白（用户截图反馈的「两边还有空隙」）。
+   * 现在：外留白 16→8，卡片内边距 12→8，grid 交给 containLabel 自适应。
+   */
+  const contentPad = isLandscape ? space.sm : space.sm;
+  const contentW = Math.max(240, width - contentPad * 2);
   /**
    * 主图基准高度。
    * 竖屏沿用原型 200；横屏从 240 起，并按实际宽度反推（上限 320），
@@ -619,7 +627,9 @@ export default function AnalyzeScreen() {
    * 之前按「横屏两列」取半宽，但多图同屏已改成横竖屏都一列一表，
    * 半宽会让图表只占屏幕左半边、右侧留大片空白，故统一取满内容宽度。
    */
-  const chartW = Math.max(160, contentW - 24);
+  /** 图表卡片边框 1dp ×2 + 内边距 8dp ×2 */
+  const CHART_CARD_INSET = 18;
+  const chartW = Math.max(160, contentW - CHART_CARD_INSET);
 
   /**
    * 毒胆同屏布局。
@@ -643,9 +653,27 @@ export default function AnalyzeScreen() {
     ? Math.round(Math.min(160, Math.max(110, tongW / 2.8)))
     : 140;
 
+  // 选号面板手动覆盖：横屏默认收起，用户点开后为 true
+  const [pickOverride, setPickOverride] = useState<boolean | null>(null);
+  /**
+   * 选号面板收起态。
+   * 横屏屏幕只有 ~360dp 高，选号面板一展开（数字格 + 形态 + 类型行）
+   * 就会把图表压成中间一条、上下全是按钮 —— 实测截图正是这个症状。
+   * 因此横屏默认收起，想看选号时手动点开。
+   */
+  const pickCollapsed = fullscreen
+    ? true
+    : isLandscape
+      ? pickOverride !== true
+      : topCollapsed;
+  const togglePickPanel = () => {
+    if (isLandscape) setPickOverride(pickCollapsed);
+    else setTopCollapsed((v) => !v);
+  };
+
   // 图表可用高度（同屏放大 / 振幅图用）
   // 全屏时只剩顶部一条 34px 的操作条，可用高度接近整屏
-  const TOP_BAR_H = fullscreen ? 34 : topCollapsed ? 30 : 180;
+  const TOP_BAR_H = fullscreen ? 34 : pickCollapsed ? 30 : 180;
   const availH = Math.max(140, height - TOP_BAR_H);
 
   /** 竖屏紧凑：按钮/页签降一档，把省下的高度让给图表 */
@@ -1608,9 +1636,6 @@ export default function AnalyzeScreen() {
 
   /** 顶栏收缩态：横屏手动收起，或全屏自动收起 */
   const chromeHidden = fullscreen || chromeCollapsed;
-  /** 选号面板：全屏时强制收起，避免和图表抢空间 */
-  const pickCollapsed = fullscreen || topCollapsed;
-
   return (
     <Screen
       safeAreaEdges={['top', 'left', 'right']}
@@ -1630,7 +1655,13 @@ export default function AnalyzeScreen() {
         ) : (
           <>
             {/* ───── brand 品牌栏 ───── */}
-            <View style={[styles.brand, chromeCollapsed && styles.brandCollapsed]}>
+            <View
+              style={[
+                styles.brand,
+                isLandscape && styles.brandLandscape,
+                chromeCollapsed && styles.brandCollapsed,
+              ]}
+            >
               <View style={[styles.logo, chromeCollapsed && styles.logoCollapsed]}>
                 <Text style={styles.logoText}>奇</Text>
               </View>
@@ -1644,23 +1675,23 @@ export default function AnalyzeScreen() {
               {isLandscape && (
                 <Pressable
                   onPress={() => setChromeCollapsed((v) => !v)}
-                  style={styles.iconBtn}
+                  style={[styles.iconBtn, isLandscape && styles.iconBtnLandscape]}
                   accessibilityState={{ expanded: !chromeCollapsed }}
                 >
                   <Text style={styles.iconBtnText}>{chromeCollapsed ? '▤' : '▬'}</Text>
                 </Pressable>
               )}
               <Pressable
-                onPress={() => setTopCollapsed((v) => !v)}
-                style={styles.iconBtn}
-                accessibilityState={{ expanded: !topCollapsed }}
+                onPress={togglePickPanel}
+                style={[styles.iconBtn, isLandscape && styles.iconBtnLandscape]}
+                accessibilityState={{ expanded: !pickCollapsed }}
               >
-                <Text style={styles.iconBtnText}>{topCollapsed ? '▼' : '▲'}</Text>
+                <Text style={styles.iconBtnText}>{pickCollapsed ? '▼' : '▲'}</Text>
               </Pressable>
             </View>
 
             {/* ───── gamebar 彩种 ───── */}
-            <View style={styles.gamebar}>
+            <View style={[styles.gamebar, isLandscape && styles.gamebarLandscape]}>
               <View style={styles.gameList}>
                 {GAMES.map((g) => {
                   const on = gameId === g.id;
@@ -1668,11 +1699,21 @@ export default function AnalyzeScreen() {
                     <Pressable
                       key={g.id}
                       onPress={() => setGameId(g.id)}
-                      style={[styles.game, dense && styles.gameCompact, on && styles.gameOn]}
+                      style={[
+                        styles.game,
+                        (dense || isLandscape) && styles.gameCompact,
+                        on && styles.gameOn,
+                      ]}
                       accessibilityState={{ selected: on }}
                     >
                       <View style={[styles.gameDot, on && styles.gameDotOn]} />
-                      <Text style={[styles.gameText, dense && styles.gameTextCompact, on && styles.gameTextOn]}>
+                      <Text
+                        style={[
+                          styles.gameText,
+                          (dense || isLandscape) && styles.gameTextCompact,
+                          on && styles.gameTextOn,
+                        ]}
+                      >
                         {g.label}
                       </Text>
                     </Pressable>
@@ -1680,7 +1721,7 @@ export default function AnalyzeScreen() {
                 })}
                 <Pressable
                   onPress={() => setGameMenuOpen(true)}
-                  style={[styles.gameMore, dense && styles.gameCompact]}
+                  style={[styles.gameMore, (dense || isLandscape) && styles.gameCompact]}
                 >
                   <Text style={styles.gameMoreText}>⋯</Text>
                 </Pressable>
@@ -1695,7 +1736,7 @@ export default function AnalyzeScreen() {
 
             {/* ───── prinav 主导航 ───── */}
             {!chromeHidden && (
-              <View style={styles.prinav}>
+              <View style={[styles.prinav, isLandscape && styles.prinavLandscape]}>
                 <Segmented
                   options={PRINAV_OPTIONS}
                   value={PRINAV_VALUE}
@@ -1709,7 +1750,7 @@ export default function AnalyzeScreen() {
 
             {/* ───── subtabs 子页签（吸顶可横滚） ───── */}
             {!chromeHidden && (
-              <View style={styles.subtabs}>
+              <View style={[styles.subtabs, isLandscape && styles.subtabsLandscape]}>
                 <SubTabs items={visibleTabs} value={tab} onChange={onTabChange} />
               </View>
             )}
@@ -1719,12 +1760,12 @@ export default function AnalyzeScreen() {
         {/* ───── content 内容区 ───── */}
         <ScrollView
           style={styles.content}
-          contentContainerStyle={styles.contentInner}
+          contentContainerStyle={[styles.contentInner, { paddingHorizontal: contentPad }]}
           showsVerticalScrollIndicator={false}
         >
           {/* 选号面板（收起时只留展开条；全屏时整块不渲染） */}
           {fullscreen ? null : pickCollapsed ? (
-            <Pressable onPress={() => setTopCollapsed(false)} style={styles.expandBar}>
+            <Pressable onPress={togglePickPanel} style={styles.expandBar}>
               <Text style={styles.expandText}>▼ 展开选号</Text>
             </Pressable>
           ) : (
@@ -1864,14 +1905,13 @@ export default function AnalyzeScreen() {
 
         {/* ───── bottombar 底部操作栏（全屏时隐藏） ───── */}
         {!fullscreen && (
-          <View style={{ paddingBottom: insets.bottom }}>
+          <View style={{ paddingBottom: isLandscape ? 0 : insets.bottom }}>
             <BottomBar
               primaryLabel="出 图"
               onPrimary={handleExport}
               ghostLabel="重置"
               onGhost={handleReset}
               hint={`${game.name} · 集合 ${codesCount} 注 · 理论 ${theoryMiss.toFixed(2)}`}
-              vertical={isLandscape}
             />
           </View>
         )}
@@ -1990,6 +2030,20 @@ const styles = StyleSheet.create({
   /** 横屏收起态：只剩图标高度，纵向空间全让给图表 */
   brandCollapsed: { paddingTop: 4, paddingBottom: 4, gap: space.sm },
   logoCollapsed: { width: 24, height: 24 },
+  /** 横屏常规态：屏幕只有 ~360dp 高，品牌栏压到 34dp */
+  brandLandscape: { paddingTop: 3, paddingBottom: 3, gap: space.sm },
+  iconBtnLandscape: {
+    minWidth: 32,
+    minHeight: 32,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  /** 横屏彩种栏压到 34dp */
+  gamebarLandscape: { paddingTop: 0, paddingBottom: 2, gap: 6 },
+  /** 横屏主导航去掉上下留白 */
+  prinavLandscape: { paddingBottom: 2 },
+  /** 横屏子页签去掉下边框那条额外留白 */
+  subtabsLandscape: { paddingBottom: 2 },
   iconBtn: {
     minWidth: touch.min,
     minHeight: touch.min,
@@ -2061,7 +2115,8 @@ const styles = StyleSheet.create({
   content: { flex: 1, backgroundColor: semantic.contentBg },
   // 注意：这里不能加 alignItems:'center'，否则 Panel 等子块会收缩到内容宽度而不再撑满。
   // 图表居中由 chartCenter 单独负责。
-  contentInner: { padding: space.lg, gap: space.lg },
+  // 左右留白由 contentPad 动态控制（见上方响应式区块），这里只给纵向
+  contentInner: { paddingVertical: space.md, gap: space.md },
   /** 图表卡片/同屏网格：占满内容宽度但整体居中 */
   chartCenter: { width: '100%', alignItems: 'center' },
   panelRight: { fontSize: fs.micro, color: semantic.textDim },

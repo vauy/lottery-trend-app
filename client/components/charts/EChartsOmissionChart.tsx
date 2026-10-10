@@ -188,12 +188,19 @@ export function EChartsOmissionChart({
       return orig === 0 ? 0 : null;
     };
 
+    /**
+     * 绘图区内边距。
+     * right 原来留 60 是照抄股票版的「右侧第二坐标轴」占位，
+     * 但本图只有一套 y 轴，这 60dp 纯属浪费 —— 在 ~500dp 宽的卡片里
+     * 等于白丢 12% 横向空间，左右各一条明显空隙。
+     * 收成 10 后配合 containLabel，刻度文字仍不会被裁掉。
+     */
     const grid = isBoth
       ? [
-          { left: 36, right: 60, top: 26, height: '34%' },
-          { left: 36, right: 60, top: '56%', height: '36%' },
+          { left: 4, right: 10, top: 26, height: '34%', containLabel: true },
+          { left: 4, right: 10, top: '56%', height: '36%', containLabel: true },
         ]
-      : [{ left: 36, right: 60, top: 26, height: '78%' }];
+      : [{ left: 4, right: 10, top: 26, height: '78%', containLabel: true }];
 
     const secondTitle = `${targetLabel ? targetLabel + '  ' : ''}二阶遗漏图（遗漏范围 ${range.min}-${range.max}）`;
     const firstTitle = `${targetLabel ? targetLabel + '  ' : ''}一阶遗漏图（历史最大:${maxMiss} 出次:${nOpens} 平均:${avgMiss.toFixed(3)} 理论:${theoryMiss.toFixed(3)} 当前:${currentMiss}）`;
