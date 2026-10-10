@@ -156,6 +156,13 @@ export function SubTabs<T extends string>({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      /**
+       * 必须加 alignSelf:'flex-start'：
+       * ScrollView 纵向默认会拉伸填满父容器，而子页签里放的是固定高度的
+       * Pressable，横屏下这一行就会被撑成 50dp 高的大色块（实测截图如此）。
+       * 让容器按内容高度收缩，页签才是正常的小胶囊。
+       */
+      style={styles.subtabScroll}
       contentContainerStyle={styles.subtabRow}
     >
       {items.map((it) => {
@@ -400,30 +407,45 @@ export function BottomBar({
   ghostLabel?: string;
   onGhost?: () => void;
   hint?: string;
-  /** 横屏时竖排 */
+  /**
+   * @deprecated 横屏不再竖排。
+   * 竖排会把「重置 + 出图」拆成上下两行、各占 flex:1 撑满高度，
+   * 横屏本来就只有 ~360dp 高，底栏会吃掉大半屏；且出图按钮被压成
+   * 没有文字的绿条。保留该参数只为兼容调用处，传了也不改变布局。
+   */
   vertical?: boolean;
 }) {
+  // 图表占据主要空间时，底栏收到一条细高度，把纵向空间让给图表
+  const compact = useDensity() === 'compact';
   return (
-    <View style={[styles.bottomBar, vertical && styles.bottomBarVertical]}>
-      {ghostLabel ? (
-        <Pressable
-          onPress={onGhost}
-          style={[styles.btnGhost, vertical && { width: '100%' }]}
-        >
-          <Text style={styles.btnGhostText}>{ghostLabel}</Text>
-        </Pressable>
-      ) : null}
+    <View style={[styles.bottomBar, compact && styles.bottomBarCompact]}>
       <Pressable
         onPress={onPrimary}
         style={({ pressed }) => [
           styles.btnMain,
-          vertical && { width: '100%' },
+          compact && styles.btnCompact,
           pressed && styles.btnMainPressed,
         ]}
       >
-        <Text style={styles.btnMainText}>{primaryLabel}</Text>
+        <Text style={[styles.btnMainText, compact && styles.btnTextCompact]}>
+          {primaryLabel}
+        </Text>
       </Pressable>
-      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      {ghostLabel ? (
+        <Pressable
+          onPress={onGhost}
+          style={[styles.btnGhost, compact && styles.btnCompactGhost]}
+        >
+          <Text style={[styles.btnGhostText, compact && styles.btnTextCompact]}>
+            {ghostLabel}
+          </Text>
+        </Pressable>
+      ) : null}
+      {hint ? (
+        <Text style={[styles.hint, styles.hintFlex]} numberOfLines={1}>
+          {hint}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -501,7 +523,8 @@ const styles = StyleSheet.create({
   segBtnCompact: { paddingVertical: 6, paddingHorizontal: 9, minHeight: 32 },
   segTextCompact: { fontSize: fs.xs },
 
-  subtabRow: { gap: 5, paddingBottom: 2 },
+  subtabScroll: { flexGrow: 0, flexShrink: 0 },
+  subtabRow: { gap: 5, paddingBottom: 2, alignItems: 'center' },
   subtab: {
     paddingVertical: 8,
     paddingHorizontal: 13,
@@ -572,7 +595,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: semantic.panelBorder,
     borderRadius: radius.md,
-    padding: 12,
+    // 8dp：原 12dp 在窄屏上把绘图区又吃掉 8dp 横向空间
+    padding: 8,
   },
   chartTitleRow: {
     flexDirection: 'row',
@@ -657,12 +681,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: semantic.divider,
   },
-  bottomBarVertical: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    justifyContent: 'flex-end',
-    borderTopWidth: 0,
-  },
+  /** 紧凑底栏：单行、矮高度，出图按钮按内容宽而非 flex 撑满 */
+  bottomBarCompact: { paddingVertical: 5, gap: space.sm },
+  btnCompact: { flex: 0, paddingHorizontal: space.xl, paddingVertical: 9 },
+  btnCompactGhost: { paddingHorizontal: space.lg, paddingVertical: 9 },
+  btnTextCompact: { fontSize: fs.sm },
+  /** 提示文字占据剩余宽度并截断，避免把按钮挤走 */
+  hintFlex: { flex: 1, textAlign: 'right' },
   btnGhost: {
     paddingVertical: 13,
     paddingHorizontal: space.lg,
@@ -679,6 +704,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: semantic.brand,
     alignItems: 'center',
+    /**
+     * 不允许被压缩到 0：竖排底栏时父容器是 column + 固定高度，
+     * flex:1 会把按钮当成「可压缩块」按比例削高，文字行随之被裁掉，
+     * 渲染出来就是一条没有文字的绿色空条（实测截图即如此）。
+     */
+    minHeight: 44,
   },
   btnMainPressed: { transform: [{ scale: 0.97 }] },
   btnMainText: {

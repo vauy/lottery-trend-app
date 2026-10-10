@@ -105,7 +105,7 @@ export function EChartsOmissionKChart({
     const optionStr = `{
       animation: false,
       backgroundColor: 'transparent',
-      grid: { left: 36, right: 16, top: 26, bottom: 22 },
+      grid: { left: 4, right: 10, top: 26, bottom: 22, containLabel: true },
       graphic: ${targetLabel ? `[{"type":"text","left":"center","top":4,"style":{"text":${JSON.stringify(targetLabel)},"fontSize":10,"fill":"${TITLE_COLOR}"}}]` : "null"},
       xAxis: {
         type: 'category',
