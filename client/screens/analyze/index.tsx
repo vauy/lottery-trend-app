@@ -22,11 +22,13 @@ import { Screen } from '@/components/Screen';
 import { EChartsFreqKChart } from '@/components/charts/EChartsFreqKChart';
 import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
+import { EChartsChuciChart } from '@/components/charts/EChartsChuciChart';
+import { EChartsMissSumChart } from '@/components/charts/EChartsMissSumChart';
 // 注：原 Skia 版原始值走势图已改用 EChartsRawChart（WebView 渲染），
 // 以保证 App 可在 Expo Go（Termux 热更新）运行，不依赖自定义原生模块。
 import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
 import { MultiPaneChart } from '@/components/charts/MultiPaneChart';
-import { aggregate, buildBoll, buildOmissionBars, lastBollTriple } from '@/components/charts/chartMath';
+import { aggregate, buildBoll, buildOmissionBars, buildChuciSeries, buildChuciMoveSeries, lastBollTriple, missSumDropRate, MISS_SUM_REF, secondOrderFromTheory, type CycleAlign } from '@/components/charts/chartMath';
 import { IndicatorPanel } from '@/components/ui/IndicatorPanel';
 import {
   DEFAULT_MA,
@@ -68,7 +70,18 @@ import {
   touch,
 } from '@/lib/theme';
 
-type ChartMode = 'freq' | 'omissionK' | 'omissionLine' | 'omissionLine2';
+/**
+ * 图表模式 —— 对齐官方《K线模式》家族。
+ * freq 周期 > 1 时按官方定义为「周期K线」（同一套 OHLC 聚合，只是加了影线）。
+ */
+type ChartMode =
+  | 'freq'
+  | 'omissionK'
+  | 'omissionLine'
+  | 'omissionLine2'
+  | 'chuci'        // 出次图（分段出次）
+  | 'chuciMove'    // 出次移动统计
+  | 'missSum';     // 遗漏和
 type TabId =
   | 'common' | 'dan' | 'dantuo' | 'pos' | 'multi'
   | 'heji' | 'amp' | 'random1' | 'random2' | 'group'
@@ -107,22 +120,46 @@ const PRINAV_OPTIONS: { value: PrinavId; label: string }[] = [
 ];
 const PRINAV_VALUE: PrinavId = 'analyze';
 
-/** 图表卡片标题 / 副标题（对齐原型 .chart-card .ctitle） */
-const CHART_META: Record<ChartMode, { title: string; meta: string }> = {
-  freq: { title: '频率K线', meta: 'diff 累计实出−理论' },
-  omissionK: { title: '遗漏K线', meta: '爬楼梯遗漏' },
-  omissionLine: { title: '遗漏图', meta: '逐期遗漏值' },
-  omissionLine2: { title: '二阶遗漏图', meta: '逐期遗漏值' },
-};
-
+/** 图表模式选择项（对齐官方《K线模式》家族） */
 const CHART_MODES: { id: ChartMode; label: string }[] = [
   { id: 'freq', label: '频率K' },
   { id: 'omissionK', label: '遗漏K' },
   { id: 'omissionLine', label: '遗漏图' },
-  { id: 'omissionLine2', label: '二阶遗漏图' },
+  { id: 'omissionLine2', label: '二阶遗漏' },
+  { id: 'chuci', label: '出次图' },
+  { id: 'chuciMove', label: '出次移动' },
+  { id: 'missSum', label: '遗漏和' },
 ];
 
 const POS_OPTIONS: Position[] = ['any', 'bai', 'shi', 'ge'];
+
+/**
+ * 遗漏和统计 —— 官方:「当本期开出 ≥ 均值 11 的遗漏和时，下期 90% 的机会向下掉头，
+ * 开出 11 以下的值，尤其是 6 以下的值居多」
+ * 这句经验值是针对**不定位胆（组选）**口径的；直选/全胆量纲不同，只给均值参考。
+ */
+function MissSumStat({ values, kind }: { values: number[]; kind: 'direct' | 'group' | 'all' }) {
+  const st = useMemo(() => missSumDropRate(values), [values]);
+  const mean = useMemo(
+    () => (values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0),
+    [values],
+  );
+  if (values.length === 0) return null;
+  if (kind !== 'group') {
+    return (
+      <Text style={styles.hint} numberOfLines={2}>
+        {`共 ${values.length} 期 · 均值 ${mean.toFixed(2)} · 当前 ${values[values.length - 1]}（官方的 11 经验值只适用于组选口径）`}
+      </Text>
+    );
+  }
+  if (st.total === 0) return null;
+  return (
+    <Text style={styles.hint} numberOfLines={3}>
+      {`共 ${values.length} 期 · 均值 ${mean.toFixed(2)} · ≥${MISS_SUM_REF} 出现 ${st.total} 次 → 次期回落至 ${MISS_SUM_REF} 以下 ${st.belowRef} 次（${(st.rate * 100).toFixed(1)}%，官方称 90%），其中 ≤6 有 ${st.belowSix} 次（${((st.belowSix / st.total) * 100).toFixed(1)}%，官方称居多）`}
+    </Text>
+  );
+}
+
 const POS_LABEL_MAP: Record<Position, string> = {
   any: '不定位', wan: '万位', qian: '千位', bai: '百位', shi: '十位', ge: '个位',
 };
@@ -332,6 +369,14 @@ export default function AnalyzeScreen() {
   const [ampMax, setAmpMax] = useState(9);
   const [hejiValue, setHejiValue] = useState(13);
   const [period, setPeriod] = useState(1);
+  /** 周期基准（官方《周期K线》1.1 左对齐 / 1.2 右对齐） */
+  const [cycleAlign, setCycleAlign] = useState<CycleAlign>('left');
+  /** 出次图/遗漏型的分段周期（步长） */
+  const [stepPeriod, setStepPeriod] = useState(10);
+  /** 退期：把最后一点的期号往前推的期数 */
+  const [drawBack, setDrawBack] = useState(0);
+  /** 遗漏和口径：直选(定位胆) / 组选(不定位胆) / 全胆 */
+  const [missSumKind, setMissSumKind] = useState<'direct' | 'group' | 'all'>('direct');
   const [chartModes, setChartModes] = useState<ChartMode[]>(['freq']);
   const [compareTargets, setCompareTargets] = useState<Target[] | null>(null);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
@@ -546,6 +591,81 @@ export default function AnalyzeScreen() {
   }, [records, tab, ampKey, ampMax]);
 
   const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD, samplingMode), [target, V, DD, samplingMode]);
+
+  /**
+   * 遗漏和 —— 官方《遗漏和》原文：
+   *   「指一个指标里面所有元素的各项遗漏值的和」
+   *   - 不定位胆（组选遗漏和）：开奖号码各数字的遗漏值之和
+   *   - 全胆遗漏和：0-9 各码当前遗漏之和
+   *   - 定位胆（直选遗漏和）：百/十/个 三位各自遗漏值之和
+   * 遗漏值取官方《开出遗漏》口径 —— 本期开出号码的**上次遗漏**：
+   *   上次出现在第 j 期、本期是第 i 期，则上次遗漏 = i − j − 1（从未出现过则 = i）。
+   */
+  const missSum = useMemo(() => {
+    if (records.length === 0) {
+      return { title: '遗漏和', issues: [] as string[], values: [] as number[] };
+    }
+    const Vv = Math.max(1, V);
+    const issues: string[] = [];
+    const direct: number[] = [];
+    const group: number[] = [];
+    const all: number[] = [];
+    // 上一次出现的期索引；-1 表示还没出现过
+    const posPrev = Array.from({ length: Math.max(1, DD) }, () => new Array(Vv).fill(-1));
+    const digPrev = new Array(Vv).fill(-1);
+    const omOf = (prev: number, i: number) => (prev < 0 ? i : i - prev - 1);
+
+    records.forEach((r, i) => {
+      issues.push(r.issue);
+      const nums = (r.nums ?? []).filter((d: number) => d >= 0 && d < Vv);
+
+      // 定位胆（直选）：按位置求和
+      let dSum = 0;
+      nums.forEach((d: number, pos: number) => {
+        dSum += omOf(posPrev[Math.min(pos, posPrev.length - 1)][d], i);
+      });
+      direct.push(dSum);
+
+      // 不定位胆（组选）：号码去重后求和
+      let gSum = 0;
+      for (const d of Array.from(new Set(nums))) gSum += omOf(digPrev[d], i);
+      group.push(gSum);
+
+      // 全胆：全部码的当前遗漏之和
+      let aSum = 0;
+      for (let d = 0; d < Vv; d += 1) aSum += omOf(digPrev[d], i);
+      all.push(aSum);
+
+      nums.forEach((d: number, pos: number) => {
+        posPrev[Math.min(pos, posPrev.length - 1)][d] = i;
+        digPrev[d] = i;
+      });
+    });
+
+    const kind = missSumKind;
+    const values = kind === 'direct' ? direct : kind === 'group' ? group : all;
+    const title =
+      kind === 'direct'
+        ? '定位胆遗漏和（直选）'
+        : kind === 'group'
+          ? '不定位胆遗漏和（组选）'
+          : '全胆遗漏和';
+    return { title, issues, values };
+  }, [records, V, DD, missSumKind]);
+  const chartMeta = useMemo(() => {
+    const m: Record<ChartMode, { title: string; meta: string }> = {
+      freq: period > 1
+        ? { title: '周期K线', meta: `周期${period} · OHLC + 影线` }
+        : { title: '频率K线', meta: 'diff 累计实出−理论' },
+      omissionK: { title: '遗漏K线', meta: '二阶遗漏 · 爬楼梯' },
+      omissionLine: { title: '遗漏图', meta: '逐期遗漏值' },
+      omissionLine2: { title: '二阶遗漏图', meta: '遗漏范围内再筛选' },
+      chuci: { title: '出次图', meta: `分段${stepPeriod}期出次` },
+      chuciMove: { title: '出次移动统计', meta: '统计期内出次渐变' },
+      missSum: { title: '遗漏和', meta: '各元素遗漏值之和' },
+    };
+    return m;
+  }, [period, stepPeriod]);
 
   // 全历史最大遗漏（用未截断的 allRecords 计算）
   const historyMaxMiss = useMemo(() => {
@@ -1530,13 +1650,63 @@ export default function AnalyzeScreen() {
   const renderDataBar = () => (
     <>
       {/* 彩种切换已由顶部 gamebar 提供，这里不再重复放一份 */}
-      <Field caption="周期">
+      {/* 官方《周期K线》：频率K线 + 周期>1 = 周期K线，具备上下影线 */}
+      <Field caption={period > 1 ? '周期K线' : '周期'}>
         <View style={styles.chipRow}>
-          {[1, 2, 3, 5, 10].map((p) => (
+          {[1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20].map((p) => (
             <Chip key={`pd-${p}`} label={String(p)} active={period === p} pill onPress={() => setPeriod(p)} />
           ))}
         </View>
+        {period > 1 && (
+          <>
+            <Text style={styles.hint} numberOfLines={2}>
+              周期值&gt;1 即为周期K线：具备上下影线，线段长度错落不一
+            </Text>
+            <Segmented
+              options={[
+                { value: 'left', label: '左对齐·开奖首期基准' },
+                { value: 'right', label: '右对齐·投注期基准' },
+              ]}
+              value={cycleAlign}
+              onChange={(v) => setCycleAlign(v as CycleAlign)}
+            />
+          </>
+        )}
       </Field>
+
+      {/* 官方《出次图》：分段周期 + 退期 */}
+      {(chartModes.includes('chuci') || chartModes.includes('chuciMove')) && (
+        <Field caption="分段周期（步长）">
+          <View style={styles.chipRow}>
+            {[5, 10, 15, 20, 25, 30, 50].map((p) => (
+              <Chip key={`sp-${p}`} label={String(p)} active={stepPeriod === p} pill onPress={() => setStepPeriod(p)} />
+            ))}
+          </View>
+          <View style={styles.rowBetween}>
+            <Text style={styles.fieldNote}>退期（最后一点前推的期数）</Text>
+            <Chip label={String(drawBack)} active onPress={() => setDrawBack(drawBack >= 30 ? 0 : drawBack + 5)} />
+          </View>
+          <Text style={styles.hint} numberOfLines={2}>
+            退期用来只对历史数据做验证，看这一段时间内号码已出现的次数
+          </Text>
+        </Field>
+      )}
+
+      {/* 官方《遗漏和》：不定位胆（组选）/ 全胆 / 定位胆（直选） */}
+      {chartModes.includes('missSum') && (
+        <Field caption="遗漏和口径">
+          <Segmented
+            options={[
+              { value: 'direct', label: '定位胆（直选）' },
+              { value: 'group', label: '不定位胆（组选）' },
+              { value: 'all', label: '全胆' },
+            ]}
+            value={missSumKind}
+            onChange={(v) => setMissSumKind(v as 'direct' | 'group' | 'all')}
+          />
+          <MissSumStat values={missSum.values} kind={missSumKind} />
+        </Field>
+      )}
       <Field caption="期数 / 分析窗口">
         <View style={styles.rowBetween}>
           <TextInput
@@ -1575,8 +1745,47 @@ export default function AnalyzeScreen() {
     label: string,
     historyMax?: number,
   ) => {
+    // 出次图 / 出次移动统计 / 遗漏和 —— 官方遗漏分析家族，走各自的折线组件
+    if (m === 'chuci' || m === 'chuciMove') {
+      const issues = s.map((p) => p.issue);
+      const hitFlags = s.map((p) => p.hit);
+      const pts =
+        m === 'chuci'
+          ? buildChuciSeries(issues, hitFlags, stepPeriod, drawBack)
+          : buildChuciMoveSeries(issues, hitFlags, stepPeriod, drawBack);
+      return (
+        <EChartsChuciChart
+          points={pts}
+          height={h}
+          width={w}
+          moveMode={m === 'chuciMove'}
+          targetLabel={`${chartMeta[m].title} · ${label}`}
+        />
+      );
+    }
+    if (m === 'missSum') {
+      const vs = missSum.values;
+      const mean = vs.length > 0 ? vs.reduce((a, b) => a + b, 0) / vs.length : 0;
+      // 官方那句「≥11 时下期 90% 回落」是针对**组选**口径说的；
+      // 直选/全胆的量纲完全不同（均值分别约 27 / 27），用各自均值当参考线才有意义。
+      const refValue = missSumKind === 'group' ? MISS_SUM_REF : Math.round(mean);
+      return (
+        <EChartsMissSumChart
+          issues={missSum.issues}
+          values={vs}
+          height={h}
+          width={w}
+          targetLabel={`${missSum.title} · ${label}`}
+          refValue={refValue}
+          tip={`当前 ${vs.length > 0 ? vs[vs.length - 1] : 0}  均值 ${mean.toFixed(1)}  参考线 ${refValue}`}
+        />
+      );
+    }
     if (activeSubs.length > 0 && (m === 'freq' || m === 'omissionK')) {
-      const bars = m === 'freq' ? aggregate(s, period) : buildOmissionBars(s, tMiss);
+      const bars =
+        m === 'freq'
+          ? aggregate(s, period, cycleAlign)
+          : buildOmissionBars(s, tMiss, secondOrderFromTheory(tMiss));
       // 右上角「上轨 / 中轨 / 下轨」数值行（参考图的指标栏）
       const cv = bars.map((b) => b.c);
       const bl = cv.length >= 2
@@ -1592,7 +1801,7 @@ export default function AnalyzeScreen() {
           indicators={activeSubs}
           height={h}
           width={w}
-          title={`${CHART_META[m].title} · ${label}`}
+          title={`${chartMeta[m].title} · ${label}`}
           metaLine={`上轨 ${fmt(tri.upper)} 中轨 ${fmt(tri.mid)} 下轨 ${fmt(tri.lower)}`}
         />
       );
@@ -1604,8 +1813,10 @@ export default function AnalyzeScreen() {
           height={h}
           width={w}
           period={period}
-          barWidth={1.5}
-          hideShadow={true}
+          align={cycleAlign}
+          // 周期>1 即官方「周期K线」：画上下影线，实体给足宽度
+          barWidth={period > 1 ? Math.max(3, Math.min(8, 40 / period)) : 1.5}
+          hideShadow={period <= 1}
           heightScale={1}
           targetLabel={label}
         />
@@ -1618,6 +1829,7 @@ export default function AnalyzeScreen() {
           height={h}
           width={w}
           theoryMiss={tMiss}
+          secondOrderP={secondOrderFromTheory(tMiss)}
           targetLabel={label}
         />
       );
@@ -1670,7 +1882,7 @@ export default function AnalyzeScreen() {
         <>
           {!fullscreen && renderZoomBar()}
           <View style={styles.chartCenter}>
-            <ChartCard title={getTargetLabel(ct)} meta={CHART_META[m].title}>
+            <ChartCard title={getTargetLabel(ct)} meta={chartMeta[m].title}>
               <Pressable onPress={() => setFocusedIdx(null)}>
                 {renderChart(
                   m,
@@ -1955,7 +2167,7 @@ export default function AnalyzeScreen() {
               {chartModes.map((m) => (
                 // 横竖屏都是一列一表，故统一用 100% 宽度，不再按 chartColW 取半宽
                 <View key={m} style={styles.chartCell}>
-                  <ChartCard title={CHART_META[m].title} meta={CHART_META[m].meta}>
+                  <ChartCard title={chartMeta[m].title} meta={chartMeta[m].meta}>
                     {renderChart(
                       m,
                       chartW,

@@ -83,13 +83,22 @@ export function buildMultiPaneHtml({
   }
 
   const closes = show.map((b) => b.c);
+  // 彩票 K 线没有真实的最高/最低价。单期 K 用每根实体两端构造 H/L；
+  // 周期K线则由 aggregate 直接按官方口径给出真实的段内高低点。
+  // ADX 的 TR 必须用它们：若退化成 |c−o| 会与 +DM+(−DM) 同值，
+  // 导致 +DI/−DI 永远互补成 100（实测标准差 0.00000000 的老 BUG）。
+  const highs = show.map((b) => b.h ?? Math.max(b.o, b.c));
+  const lows = show.map((b) => b.l ?? Math.min(b.o, b.c));
   const maList = computeMa(closes, maConfigs);
   const boll = showBoll ? buildBoll(closes, Math.min(20, Math.max(2, n)), 2) : null;
-  const subResults = subs.map((id) => ({ id, res: computeIndicator(id, { values: closes }) }));
+  const subResults = subs.map((id) => ({
+    id,
+    res: computeIndicator(id, { values: closes, highs, lows }),
+  }));
 
-  /* ───── 主图 y 轴范围：K 线实体 + 均线 + 布林 ───── */
+  /* ───── 主图 y 轴范围：K 线实体 + 影线 + 均线 + 布林 ───── */
   const mainY: number[] = [];
-  for (const b of show) mainY.push(b.o, b.c);
+  for (let i = 0; i < n; i += 1) mainY.push(show[i].o, show[i].c, highs[i], lows[i]);
   for (const m of maList) for (const v of m.data) if (v !== null) mainY.push(v);
   if (boll) {
     for (const v of boll.upper) if (v !== null) mainY.push(v);
@@ -172,26 +181,43 @@ export function buildMultiPaneHtml({
     return ax;
   };
 
-  /* ───── 主图 series：K 线实体 + 均线 + 布林 ───── */
+  /* ───── 主图 series：K 线（实体 + 上下影线）+ 均线 + 布林 ─────
+   * data 每行是 [idx, o, c, h, l]；h/l 由 aggregate 给出，
+   * 单期 K 时 h/l 等于实体两端，影线自然退化为零长。 */
   const candleSeries = {
     type: 'custom',
     renderItem: `${FN}function(params, api) {
       var idx = api.value(0);
       var o = api.value(1);
       var c = api.value(2);
+      var h = api.value(3);
+      var l = api.value(4);
       var x = api.coord([idx, 0])[0];
       var yO = api.coord([idx, o])[1];
       var yC = api.coord([idx, c])[1];
-      var top = Math.min(yO, yC);
-      var h = Math.max(1.5, Math.abs(yC - yO));
+      var yH = api.coord([idx, h])[1];
+      var yL = api.coord([idx, l])[1];
+      var bodyTop = Math.min(yO, yC);
+      var bodyBot = Math.max(yO, yC);
+      var bh = Math.max(1.5, bodyBot - bodyTop);
       var bw = Math.max(1.5, Math.min(5, (params.coordSys.width / ${n}) * 0.6));
-      return {
-        type: 'rect',
-        shape: { x: x - bw / 2, y: top, width: bw, height: h },
-        style: { fill: c >= o ? '${UP}' : '${DOWN}' }
-      };
+      var up = c >= o;
+      var fill = up ? '${UP}' : '${DOWN}';
+      var children = [
+        {
+          type: 'line',
+          shape: { x1: x, y1: yH, x2: x, y2: yL },
+          style: { stroke: fill, lineWidth: 1 }
+        },
+        {
+          type: 'rect',
+          shape: { x: x - bw / 2, y: bodyTop, width: bw, height: bh },
+          style: { fill: fill }
+        }
+      ];
+      return { type: 'group', children: children };
     }${FN}`,
-    data: show.map((b, i) => [i, b.o, b.c]),
+    data: show.map((b, i) => [i, b.o, b.c, highs[i], lows[i]]),
     xAxisIndex: 0,
     yAxisIndex: 0,
     z: 5,

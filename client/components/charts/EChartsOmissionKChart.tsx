@@ -7,7 +7,7 @@ import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ECHARTS_SOURCE } from '@/lib/echartsSource';
 import type { TargetPoint } from '@/lib/lottery/targets';
-import { buildOmissionBars } from './chartMath';
+import { buildOmissionBars, secondOrderFromTheory } from './chartMath';
 import { palette, semantic } from '@/lib/theme';
 
 /** 爬楼梯：升档 = 热（red），降档 = 冷（cyan） */
@@ -32,16 +32,20 @@ export function EChartsOmissionKChart({
   height = 300,
   width = 350,
   theoryMiss = 0,
+  secondOrderP,
   targetLabel,
 }: {
   series: TargetPoint[];
   height?: number;
   width?: number;
   theoryMiss?: number;
+  /** 二阶概率 p₂；不传则由 theoryMiss 反推 */
+  secondOrderP?: number;
   targetLabel?: string;
 }) {
   const html = useMemo(() => {
-    const bars = buildOmissionBars(series, theoryMiss);
+    const p2 = secondOrderP ?? secondOrderFromTheory(theoryMiss);
+    const bars = buildOmissionBars(series, theoryMiss, p2);
     const showBars = bars.length > MAX_SHOW ? bars.slice(-MAX_SHOW) : bars;
     const n = showBars.length;
 
@@ -57,9 +61,13 @@ export function EChartsOmissionKChart({
 
     const xLabels = showBars.map((b) => b.issue.slice(-3));
     // x 从 0 开始重新编号（只画可见区间）
+    // 官方 1.1 的「预先画一根阴线」是待定的，给个虚线描边跟已开出的区分开
     const dataFinal = showBars.map((b, i) => ({
       value: [i, b.o, b.c],
-      itemStyle: { color: b.isRed ? UP : DOWN },
+      itemStyle: {
+        color: b.isRed ? UP : DOWN,
+        ...(b.pending ? { opacity: 0.55, borderColor: UP, borderWidth: 0.5, borderType: 'dashed' } : {}),
+      },
     }));
 
     const labelStep = Math.max(1, Math.floor(n / 15));
@@ -132,7 +140,7 @@ export function EChartsOmissionKChart({
   </script>
 </body>
 </html>`;
-  }, [series, theoryMiss, height, width]);
+  }, [series, theoryMiss, secondOrderP, height, width, targetLabel]);
 
   return (
     <View style={{ width, height }}>
