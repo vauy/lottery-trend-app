@@ -80,7 +80,9 @@ try {
   const packagesToInstall = missingPackages.join(' ');
 
   try {
-    execSync(`pnpm expo install ${packagesToInstall}`, {
+    // 用 npx 调用 expo install，避免硬编码 pnpm：
+    // pnpm 在 Termux / Android 文件系统上会因 lock_shared() 不支持而崩溃。
+    execSync(`npx expo install ${packagesToInstall}`, {
       stdio: 'inherit',
     });
 
