@@ -541,6 +541,30 @@ export default function AnalyzeScreen() {
   const [dataTaskMsg, setDataTaskMsg] = useState('');
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  /** 同屏滚动容器（点开某格后要滚到它的位置） */
+  const scrollRef = useRef<ScrollView>(null);
+  /** 同屏网格容器相对滚动内容的 y */
+  const gridYRef = useRef(0);
+  /** 每个同屏格相对网格容器的 y（idx → y） */
+  const cellYRef = useRef<Record<number, number>>({});
+
+  /**
+   * 点开某格（切成 1 列）后，等布局落定再把该格滚到屏幕顶部。
+   * 双列 → 单列时每格高度都会变，所以延迟一点读最新的 onLayout 结果。
+   */
+  useEffect(() => {
+    if (focusedIdx === null) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      if (cancelled) return;
+      const y = gridYRef.current + (cellYRef.current[focusedIdx] ?? 0);
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 6), animated: true });
+    }, 140);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [focusedIdx]);
   /** 图表缩放倍率（放大/缩小按钮调整图表高度） */
   const [chartZoom, setChartZoom] = useState(1);
   /** 选号抽屉是否展开（用于决定图表可用高度） */
@@ -1004,20 +1028,22 @@ export default function AnalyzeScreen() {
   );
 
   /**
-   * 毒胆同屏布局（对齐参考图：竖屏即 2 列 × 5 行）。
-   * 参考图每码一个小面板，2 列排布，点单格放大成整屏单图。
+   * 毒胆同屏布局（对齐参考图：竖屏默认 2 列 × 5 行）。
+   * 点按某格后转「1 列 × 10 行」，仍是全部同屏，只是单列显示并定位到该格。
    * 单格图表高度按宽度反推：主图 + 副图挤在太矮的格里会糊成一团
    * （旧值竖屏仅 170dp，主图被压到 ~60dp），这里抬高到 ≥200dp。
    */
-  const tongColumns = 2;
+  const tongColumns = focusedIdx === null ? 2 : 1;
   const tongGap = 8;
   const tongW = Math.max(
     140,
     Math.floor((contentW - (tongColumns - 1) * tongGap) / tongColumns) - 14,
   );
-  const tongH = isLandscape
-    ? Math.round(Math.min(250, Math.max(180, tongW / 1.7)))
-    : Math.round(Math.min(280, Math.max(210, tongW * 1.35)));
+  const tongH = tongColumns === 1
+    ? Math.round(Math.min(400, Math.max(240, tongW * 0.95)))
+    : isLandscape
+      ? Math.round(Math.min(250, Math.max(180, tongW / 1.7)))
+      : Math.round(Math.min(280, Math.max(210, tongW * 1.35)));
 
   /**
    * 选号已搬进底部抽屉，页面内不再有「选号面板折叠」这回事。
@@ -2461,95 +2487,53 @@ export default function AnalyzeScreen() {
     );
   };
 
-  /** 毒胆同屏：竖屏 1 列 × 10 行；点按放大单图 */
+  /**
+   * 毒胆同屏：默认 2 列 × 5 行。
+   * 点按某格 → 转「1 列 × 10 行」并把该格滚到屏幕（对齐参考图：满屏后仍是同屏状态，
+   * 只是二列五行变一列十行、屏幕定位到点击的那张），再点同一格还原双列。
+   */
   const renderCompare = () => {
     if (!compareTargets || compareTargets.length === 0) return null;
-    const list = compareTargets
-      .map((ct, idx) => ({ ct, idx }))
-      .filter(({ idx }) => focusedIdx === null || focusedIdx === idx);
-
-    // 满屏模式：单张大图（水平居中）
-    if (focusedIdx !== null && list.length > 0) {
-      const { ct, idx } = list[0];
-      const sliceN = records.length;
-      const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
-      const tMiss = getTheoryMiss(ct, V, DD);
-      const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
-      const m = cellModes[idx] ?? chartModes[0];
-      const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
-      return (
-        <>
-          {!fullscreen && renderZoomBar()}
-          <View style={styles.chartCenter}>
-            <View style={styles.cellBox}>
-              {renderCellHeader(idx, ct, tMiss, oSeries, label)}
-              <Pressable onPress={() => setFocusedIdx(null)}>
-                {renderChart(
-                  m,
-                  chartW,
-                  // 放大态：高度按宽度反推（约 1.1:1）并夹在可用高度内。
-                  // 旧写法 max(chartSize.h*2, availH-40) 会让高度逼近整屏，
-                  // 主图被纵向拉成细长条（K 线失真），这里对齐参考图比例。
-                  Math.round(Math.min(availH - 40, Math.max(chartSize.h * 1.6, chartW * 1.1)) * chartZoom),
-                  s,
-                  oSeries,
-                  tMiss,
-                  getTargetLabel(ct),
-                  historyMaxMiss,
-                  cellOverlay[idx] ?? 'none',
-                )}
-              </Pressable>
-              {renderCellOverlays(idx, ct)}
-            </View>
-          </View>
-          <View style={{ height: space.md }} />
-          <View style={styles.chipRow}>
-            <Chip
-              label="退出同屏"
-              active={false}
-              onPress={() => { setCompareTargets(null); setPickExpanded(false); setFocusedIdx(null); }}
-            />
-          </View>
-        </>
-      );
-    }
-
+    const single = focusedIdx !== null;
     return (
       <>
         {!fullscreen && renderZoomBar()}
-        <TongGrid columns={tongColumns}>
-          {list.map(({ ct, idx }) => {
-            // 同屏格很窄（约 170dp），K 线画太多会糊成一片。
-            // 对齐参考图：单格只画最近 80 期，趋势清晰、不拥挤。
-            const sliceN = Math.min(records.length, 80);
-            const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
-            const tMiss = getTheoryMiss(ct, V, DD);
-            const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
-            // 胆码标签
-            const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
-            const m = cellModes[idx] ?? chartModes[0];
-            const cellW = tongW;
-            return (
-              <View key={idx} style={[styles.cellBox, tongColumns === 2 && { width: tongW }]}>
-                {renderCellHeader(idx, ct, tMiss, oSeries, label)}
-                <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
-                  {renderChart(
-                    m,
-                    cellW,
-                    Math.round(tongH * chartZoom),
-                    s,
-                    oSeries,
-                    tMiss,
-                    getTargetLabel(ct),
-                    historyMaxMiss,
-                    cellOverlay[idx] ?? 'none',
-                  )}
-                </Pressable>
-                {renderCellOverlays(idx, ct)}
-              </View>
-            );
-          })}
-        </TongGrid>
+        <View onLayout={(e) => { gridYRef.current = e.nativeEvent.layout.y; }}>
+          <TongGrid columns={tongColumns}>
+            {compareTargets.map((ct, idx) => {
+              // 单列时格子大，可多看几期；双列窄格只画 80 期避免糊成一片
+              const sliceN = Math.min(records.length, single ? 160 : 80);
+              const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
+              const tMiss = getTheoryMiss(ct, V, DD);
+              const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
+              const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
+              const m = cellModes[idx] ?? chartModes[0];
+              return (
+                <View
+                  key={idx}
+                  style={[styles.cellBox, tongColumns === 2 && { width: tongW }]}
+                  onLayout={(e) => { cellYRef.current[idx] = e.nativeEvent.layout.y; }}
+                >
+                  {renderCellHeader(idx, ct, tMiss, oSeries, label)}
+                  <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
+                    {renderChart(
+                      m,
+                      tongW,
+                      Math.round(tongH * chartZoom),
+                      s,
+                      oSeries,
+                      tMiss,
+                      getTargetLabel(ct),
+                      historyMaxMiss,
+                      cellOverlay[idx] ?? 'none',
+                    )}
+                  </Pressable>
+                  {renderCellOverlays(idx, ct)}
+                </View>
+              );
+            })}
+          </TongGrid>
+        </View>
       </>
     );
   };
@@ -2603,6 +2587,7 @@ export default function AnalyzeScreen() {
 
         {/* ───── content 内容区 ───── */}
         <ScrollView
+          ref={scrollRef}
           style={styles.content}
           contentContainerStyle={[
             styles.contentInner,
