@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+npm-debug.*
+*.log
+*.apk
+*.aab
+*.keystore
+*.jks
+.gradle/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,115 @@
+# 云端构建安卓 APK（GitHub Actions）
+#
+# 用法：把本文件放到仓库根目录的 .github/workflows/build-apk.yml
+#       （GitHub 只识别仓库根目录下 .github/workflows/ 里的工作流）
+#       然后在 GitHub 仓库页面 → Actions → Build Android APK → Run workflow
+#
+# 说明：本项目在 zqm-app/ 子目录，因此所有命令都带 working-directory。
+#      构建产出自签名 release APK，可直接安装到手机。
+
+name: Build Android APK
+
+on:
+  push:
+    branches: [feat/fresh-expo-go]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: zqm-app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 安装 Android SDK + RN 0.81 必需的 NDK / CMake
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1'
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('zqm-app/**/*.json') }}
+          restore-keys: gradle-
+
+      - name: Install JS deps
+        working-directory: zqm-app
+        run: npm install --no-audit --no-frozen-lockfile
+
+      - name: Expo prebuild (android)
+        working-directory: zqm-app
+        run: npx expo prebuild --platform android --clean
+
+      # 生成自签名 keystore，使 release APK 可直接安装
+      - name: Generate signing keystore
+        working-directory: zqm-app/android/app
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -alias release \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android123 -keypass android123 \
+            -dname "CN=ZQM, OU=App, O=ZQM, L=Unknown, S=Unknown, C=CN"
+          cat >> ../../android/gradle.properties <<'EOF'
+          MYAPP_RELEASE_STORE_FILE=release.keystore
+          MYAPP_RELEASE_STORE_PASSWORD=android123
+          MYAPP_RELEASE_KEY_ALIAS=release
+          MYAPP_RELEASE_KEY_PASSWORD=android123
+          EOF
+
+      - name: Configure release signing
+        working-directory: zqm-app/android/app
+        run: |
+          python3 - <<'PY'
+          import re, io
+          p = 'build.gradle'
+          s = open(p, encoding='utf-8').read()
+          if 'signingConfigs.release' not in s:
+              s = s.replace(
+                  'buildTypes {',
+                  '''signingConfigs {
+          release {
+              storeFile file(MYAPP_RELEASE_STORE_FILE)
+              storePassword MYAPP_RELEASE_STORE_PASSWORD
+              keyAlias MYAPP_RELEASE_KEY_ALIAS
+              keyPassword MYAPP_RELEASE_KEY_PASSWORD
+          }
+      }
+      buildTypes {'''
+              )
+          s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+          open(p, 'w', encoding='utf-8').write(s)
+          print('signing configured')
+          PY
+
+      - name: Build release APK
+        working-directory: zqm-app/android
+        run: ./gradlew assembleRelease --no-daemon -x lintVitalRelease
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find zqm-app/android/app/build/outputs -name "*.apk" | head -1)
+          echo "path=$APK" >> $GITHUB_OUTPUT
+          echo "size=$(du -h "$APK" | cut -f1)" >> $GUBHUB_OUTPUT || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zqm-trend-release-apk
+          path: zqm-app/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
