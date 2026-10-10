@@ -21,9 +21,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { Screen } from '@/components/Screen';
 import { EChartsFreqKChart } from '@/components/charts/EChartsFreqKChart';
 import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
-import { OmissionChart } from '@/components/charts/OmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
-import { SkiaRawChart } from '@/components/charts/SkiaRawChart';
+// 注：原 Skia 版原始值走势图已改用 EChartsRawChart（WebView 渲染），
+// 以保证 App 可在 Expo Go（Termux 热更新）运行，不依赖自定义原生模块。
+import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
 import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
@@ -34,6 +35,7 @@ import {
   BottomBar,
   ChartCard,
   Chip,
+  DensityProvider,
   DigitGrid,
   Field,
   Legend,
@@ -294,6 +296,25 @@ export default function AnalyzeScreen() {
   const [bai, setBai] = useState<number[]>([]);
   const [shi, setShi] = useState<number[]>([]);
   const [ge, setGe] = useState<number[]>([]);
+  // 排列五：万位 / 千位
+  const [wan, setWan] = useState<number[]>([]);
+  const [qian, setQian] = useState<number[]>([]);
+
+  /** 定位（复式倍数）按位选择的位置槽：3 位=百/十/个，5 位=万/千/百/十/个 */
+  const posSlots = useMemo(() => {
+    const slots: { key: string; label: string; arr: number[]; setArr: (v: number[]) => void }[] = [
+      { key: 'bai', label: '百位', arr: bai, setArr: setBai },
+      { key: 'shi', label: '十位', arr: shi, setArr: setShi },
+      { key: 'ge', label: '个位', arr: ge, setArr: setGe },
+    ];
+    if (game.digitCount >= 5) {
+      slots.unshift(
+        { key: 'qian', label: '千位', arr: qian, setArr: setQian },
+        { key: 'wan', label: '万位', arr: wan, setArr: setWan },
+      );
+    }
+    return slots;
+  }, [game.digitCount, bai, shi, ge, wan, qian]);
   const [multiMode, setMultiMode] = useState<'pos' | 'nopos'>('pos');
   const [noposNums, setNoposNums] = useState<number[]>([]);
   const [hejiKey, setHejiKey] = useState<string>('sum');
@@ -309,6 +330,12 @@ export default function AnalyzeScreen() {
   const [dataTaskMsg, setDataTaskMsg] = useState('');
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  /** 图表缩放倍率（放大/缩小按钮调整图表高度） */
+  const [chartZoom, setChartZoom] = useState(1);
+  /** 全屏：隐藏品牌栏/彩种/导航等 chrome，把整屏留给图表 */
+  const [fullscreen, setFullscreen] = useState(false);
+  /** 横屏时收起顶部 chrome（品牌栏 + 主导航 + 子页签），保留彩种与操作栏 */
+  const [chromeCollapsed, setChromeCollapsed] = useState(false);
 
   const V = game.digitMax - game.digitMin + 1;
   const DD = game.digitCount;
@@ -382,7 +409,7 @@ export default function AnalyzeScreen() {
       else if (tab === 'pos') digitsForShape = [posDigit];
       else if (tab === 'multi') {
         digitsForShape = multiMode === 'pos'
-          ? [...new Set([...bai, ...shi, ...ge])]
+          ? [...new Set(posSlots.flatMap((s) => s.arr))]
           : [...noposNums];
       }
       else digitsForShape = shapeDigits;
@@ -454,11 +481,15 @@ export default function AnalyzeScreen() {
     if (tab === 'pos') return { kind: 'digit', digit: posDigit, pos };
     if (tab === 'multi') {
       if (multiMode === 'pos') {
-        if (bai.length === 0 || shi.length === 0 || ge.length === 0)
-          return { kind: 'set', codes: new Set() };
-        const codes = new Set<string>();
-        for (const a of bai) for (const b of shi) for (const c of ge) codes.add(`${a}${b}${c}`);
-        return { kind: 'set', codes };
+        if (posSlots.some((s) => s.arr.length === 0)) return { kind: 'set', codes: new Set() };
+        // 按位置做笛卡尔积：3 位 → 百十百；5 位 → 万千百十全
+        let codes: string[] = [''];
+        for (const s of posSlots) {
+          const next: string[] = [];
+          for (const prefix of codes) for (const d of s.arr) next.push(prefix + String(d));
+          codes = next;
+        }
+        return { kind: 'set', codes: new Set(codes) };
       } else {
         // 不定位复式：每位从 noposNums 里选，可重复
         if (noposNums.length === 0) return { kind: 'set', codes: new Set() };
@@ -472,7 +503,7 @@ export default function AnalyzeScreen() {
     if (tab === 'amp') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     return { kind: 'set', codes: new Set() };
   }, [tab, type, externalCodes, shapeMainMode, shapeFilters, shapeDigits, dan, commonDigit, commonMode, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
-    bai, shi, ge, multiMode, noposNums, hejiKey, hejiValue]);
+    bai, shi, ge, wan, qian, posSlots, multiMode, noposNums, hejiKey, hejiValue]);
 
   const codesCount = useMemo(() => {
     if (target.kind === 'set') return target.codes.size;
@@ -574,14 +605,77 @@ export default function AnalyzeScreen() {
   // ============ 响应式：横屏 / 宽屏 ============
   const isLandscape = width >= 860 || width > height;
   const contentW = Math.max(240, width - space.lg * 2);
-  const chartH = isLandscape ? chartSize.hLandscape : chartSize.h;
-  const chartColW = isLandscape ? Math.floor((contentW - space.lg) / 2) : contentW;
-  const chartW = Math.max(160, chartColW - 24);
-  const tongW = Math.max(120, Math.floor(contentW * 0.48) - 12);
+  /**
+   * 主图基准高度。
+   * 竖屏沿用原型 200；横屏从 240 起，并按实际宽度反推（上限 320），
+   * 避免平板/宽屏下单列满宽图表被压成 4:1 的扁条。
+   * 用户还可用缩放按钮在 0.6x~3x 之间继续微调。
+   */
+  const chartH = isLandscape
+    ? Math.round(Math.max(chartSize.hLandscape, Math.min(320, (contentW - 24) / 2.8)))
+    : chartSize.h;
+  /**
+   * 主图 / 多图同屏的绘制宽度。
+   * 之前按「横屏两列」取半宽，但多图同屏已改成横竖屏都一列一表，
+   * 半宽会让图表只占屏幕左半边、右侧留大片空白，故统一取满内容宽度。
+   */
+  const chartW = Math.max(160, contentW - 24);
+
+  /**
+   * 毒胆同屏布局。
+   * 竖屏：1 列 × 10 行（0-9 竖着排），单格撑满内容宽度；
+   * 横屏：2 列 × 5 行，单格取半宽。
+   * 单格高度按宽度反推，保证宽高比落在 2.2~3.3，避免「宽度大、高度小」把 K 线压扁失真。
+   */
+  const tongColumns = isLandscape ? 2 : 1;
+  const tongGap = 8;
+  const tongW = Math.max(
+    160,
+    Math.floor((contentW - (tongColumns - 1) * tongGap) / tongColumns) - 14,
+  );
+  /**
+   * 单格内图表高度：
+   * - 竖屏单列：宽度约一屏，140 已能给出约 2.3 的宽高比；
+   * - 横屏两列：单格宽度接近半屏（手机横屏约 356dp），固定 88 会压出 4.0 的极度扁平，
+   *   故按宽度 /2.8 反推并夹在 [110,160]，实测宽高比落在 2.7~3.0。
+   */
+  const tongH = isLandscape
+    ? Math.round(Math.min(160, Math.max(110, tongW / 2.8)))
+    : 140;
 
   // 图表可用高度（同屏放大 / 振幅图用）
-  const TOP_BAR_H = topCollapsed ? 30 : 180;
+  // 全屏时只剩顶部一条 34px 的操作条，可用高度接近整屏
+  const TOP_BAR_H = fullscreen ? 34 : topCollapsed ? 30 : 180;
   const availH = Math.max(140, height - TOP_BAR_H);
+
+  /** 竖屏紧凑：按钮/页签降一档，把省下的高度让给图表 */
+  const dense = !isLandscape;
+
+  // ============ 图表缩放 / 全屏 ============
+  const ZOOM_STEP = 0.2;
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 3;
+  const stepZoom = (delta: number) =>
+    setChartZoom((z) => {
+      const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z + delta));
+      // 规避浮点累积误差（0.1+0.2 问题），统一保留两位
+      return Math.round(next * 100) / 100;
+    });
+
+  /** 图表缩放 + 全屏操作条 */
+  const renderZoomBar = () => (
+    <View style={styles.zoomBar}>
+      <Chip label="−" active={false} onPress={() => stepZoom(-ZOOM_STEP)} />
+      <Text style={styles.zoomText}>{Math.round(chartZoom * 100)}%</Text>
+      <Chip label="+" active={false} onPress={() => stepZoom(ZOOM_STEP)} />
+      <Chip label="重置" active={false} onPress={() => setChartZoom(1)} />
+      <Chip
+        label={fullscreen ? '退出全屏' : '全屏'}
+        active={fullscreen}
+        onPress={() => setFullscreen((v) => !v)}
+      />
+    </View>
+  );
 
   // ============ 行渲染 ============
   const runFullFetch = () => {
@@ -1200,9 +1294,9 @@ export default function AnalyzeScreen() {
 
       {multiMode === 'pos' ? (
         <>
-          {renderDigitRow('百位', bai, setBai)}
-          {renderDigitRow('十位', shi, setShi)}
-          {renderDigitRow('个位', ge, setGe)}
+          {posSlots.map((s) => (
+            <View key={s.key}>{renderDigitRow(s.label, s.arr, s.setArr)}</View>
+          ))}
         </>
       ) : (
         renderDigitRow('号码', noposNums, setNoposNums)
@@ -1338,17 +1432,8 @@ export default function AnalyzeScreen() {
   /** 数据 / 期数面板（原底部工具栏） */
   const renderDataBar = () => (
     <>
-      <Field caption="彩种 / 周期">
-        <View style={styles.chipRow}>
-          {[{ id: 'fc3d', label: '福彩3D' }, { id: 'pl3', label: '排列3' }].map((g) => (
-            <Chip
-              key={g.id}
-              label={g.label}
-              active={gameId === g.id}
-              onPress={() => setGameId(g.id)}
-            />
-          ))}
-        </View>
+      {/* 彩种切换已由顶部 gamebar 提供，这里不再重复放一份 */}
+      <Field caption="周期">
         <View style={styles.chipRow}>
           {[1, 2, 3, 5, 10].map((p) => (
             <Chip key={`pd-${p}`} label={String(p)} active={period === p} onPress={() => setPeriod(p)} />
@@ -1442,14 +1527,14 @@ export default function AnalyzeScreen() {
     return null;
   };
 
-  /** 毒胆同屏：原型 .tong-grid 两列；点按放大单图 */
+  /** 毒胆同屏：竖屏 1 列 × 10 行；点按放大单图 */
   const renderCompare = () => {
     if (!compareTargets || compareTargets.length === 0) return null;
     const list = compareTargets
       .map((ct, idx) => ({ ct, idx }))
       .filter(({ idx }) => focusedIdx === null || focusedIdx === idx);
 
-    // 满屏模式：单张大图
+    // 满屏模式：单张大图（水平居中）
     if (focusedIdx !== null && list.length > 0) {
       const { ct } = list[0];
       const sliceN = records.length;
@@ -1459,19 +1544,22 @@ export default function AnalyzeScreen() {
       const m = chartModes[0]; // 同屏只显示第一种图
       return (
         <>
-          <ChartCard title={getTargetLabel(ct)} meta={CHART_META[m].title}>
-            <Pressable onPress={() => setFocusedIdx(null)}>
-              {renderChart(
-                m,
-                chartW,
-                Math.max(chartSize.h * 2, availH - 40),
-                s,
-                oSeries,
-                tMiss,
-                getTargetLabel(ct),
-              )}
-            </Pressable>
-          </ChartCard>
+          {!fullscreen && renderZoomBar()}
+          <View style={styles.chartCenter}>
+            <ChartCard title={getTargetLabel(ct)} meta={CHART_META[m].title}>
+              <Pressable onPress={() => setFocusedIdx(null)}>
+                {renderChart(
+                  m,
+                  chartW,
+                  Math.round(Math.max(chartSize.h * 2, availH - 40) * chartZoom),
+                  s,
+                  oSeries,
+                  tMiss,
+                  getTargetLabel(ct),
+                )}
+              </Pressable>
+            </ChartCard>
+          </View>
           <View style={{ height: space.md }} />
           <View style={styles.chipRow}>
             <Chip
@@ -1485,26 +1573,43 @@ export default function AnalyzeScreen() {
     }
 
     return (
-      <TongGrid>
-        {list.map(({ ct, idx }) => {
-          const sliceN = Math.min(records.length, 300);
-          const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
-          const tMiss = getTheoryMiss(ct, V, DD);
-          const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
-          // 胆码标签
-          const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
-          const m = chartModes[0]; // 同屏只显示第一种图
-          return (
-            <TongCell key={idx} digit={label}>
-              <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
-                {renderChart(m, tongW, chartSize.tongCell, s, oSeries, tMiss, getTargetLabel(ct))}
-              </Pressable>
-            </TongCell>
-          );
-        })}
-      </TongGrid>
+      <>
+        {!fullscreen && renderZoomBar()}
+        <TongGrid columns={tongColumns}>
+          {list.map(({ ct, idx }) => {
+            const sliceN = Math.min(records.length, 300);
+            const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
+            const tMiss = getTheoryMiss(ct, V, DD);
+            const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
+            // 胆码标签
+            const label = ct.kind === 'digit' ? String(ct.digit) : String(idx);
+            const m = chartModes[0]; // 同屏只显示第一种图
+            const cellW = tongColumns === 1 ? chartW : tongW;
+            return (
+              <TongCell key={idx} digit={label} width={tongColumns === 1 ? undefined : tongW}>
+                <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
+                  {renderChart(
+                    m,
+                    cellW,
+                    Math.round(tongH * chartZoom),
+                    s,
+                    oSeries,
+                    tMiss,
+                    getTargetLabel(ct),
+                  )}
+                </Pressable>
+              </TongCell>
+            );
+          })}
+        </TongGrid>
+      </>
     );
   };
+
+  /** 顶栏收缩态：横屏手动收起，或全屏自动收起 */
+  const chromeHidden = fullscreen || chromeCollapsed;
+  /** 选号面板：全屏时强制收起，避免和图表抢空间 */
+  const pickCollapsed = fullscreen || topCollapsed;
 
   return (
     <Screen
@@ -1512,70 +1617,104 @@ export default function AnalyzeScreen() {
       backgroundColor={semantic.pageBg}
       statusBarStyle="light"
     >
+      <DensityProvider value={dense ? 'compact' : 'regular'}>
       <View style={styles.shell}>
-        {/* ───── brand 品牌栏 ───── */}
-        <View style={styles.brand}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>奇</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.brandTitle}>臻奇妙趋势分析</Text>
-            <Text style={styles.brandSub}>TREND · 手机原型</Text>
-          </View>
-          <Pressable
-            onPress={() => setTopCollapsed((v) => !v)}
-            style={styles.iconBtn}
-            accessibilityState={{ expanded: !topCollapsed }}
-          >
-            <Text style={styles.iconBtnText}>{topCollapsed ? '▼' : '▲'}</Text>
-          </Pressable>
-        </View>
-
-        {/* ───── gamebar 彩种 ───── */}
-        <View style={styles.gamebar}>
-          <View style={styles.gameList}>
-            {GAMES.map((g) => {
-              const on = gameId === g.id;
-              return (
-                <Pressable
-                  key={g.id}
-                  onPress={() => setGameId(g.id)}
-                  style={[styles.game, on && styles.gameOn]}
-                  accessibilityState={{ selected: on }}
-                >
-                  <View style={[styles.gameDot, on && styles.gameDotOn]} />
-                  <Text style={[styles.gameText, on && styles.gameTextOn]}>{g.label}</Text>
-                </Pressable>
-              );
-            })}
-            <Pressable onPress={() => setGameMenuOpen(true)} style={styles.gameMore}>
-              <Text style={styles.gameMoreText}>⋯</Text>
-            </Pressable>
-          </View>
-          <StatPill>
-            <Text style={styles.statusText}>
-              数据 <Text style={styles.statusBold}>{allRecords.length}</Text> 期 · 当前遗漏{' '}
-              <Text style={styles.statusBold}>{currentOmission}</Text>
+        {/* ───── 全屏：只留一条细操作条，整屏都给图表 ───── */}
+        {fullscreen ? (
+          <View style={styles.fsBar}>
+            <Text style={styles.fsTitle} numberOfLines={1}>
+              {game.name} · {getTargetLabel(target)}
             </Text>
-          </StatPill>
-        </View>
+            {renderZoomBar()}
+          </View>
+        ) : (
+          <>
+            {/* ───── brand 品牌栏 ───── */}
+            <View style={[styles.brand, chromeCollapsed && styles.brandCollapsed]}>
+              <View style={[styles.logo, chromeCollapsed && styles.logoCollapsed]}>
+                <Text style={styles.logoText}>奇</Text>
+              </View>
+              {!chromeCollapsed && (
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.brandTitle}>臻奇妙趋势分析</Text>
+                  <Text style={styles.brandSub}>TREND · 手机原型</Text>
+                </View>
+              )}
+              {/* 横屏：收起/展开顶部 chrome（主导航 + 子页签），把纵向空间让给图表 */}
+              {isLandscape && (
+                <Pressable
+                  onPress={() => setChromeCollapsed((v) => !v)}
+                  style={styles.iconBtn}
+                  accessibilityState={{ expanded: !chromeCollapsed }}
+                >
+                  <Text style={styles.iconBtnText}>{chromeCollapsed ? '▤' : '▬'}</Text>
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => setTopCollapsed((v) => !v)}
+                style={styles.iconBtn}
+                accessibilityState={{ expanded: !topCollapsed }}
+              >
+                <Text style={styles.iconBtnText}>{topCollapsed ? '▼' : '▲'}</Text>
+              </Pressable>
+            </View>
 
-        {/* ───── prinav 主导航 ───── */}
-        <View style={styles.prinav}>
-          <Segmented
-            options={PRINAV_OPTIONS}
-            value={PRINAV_VALUE}
-            onChange={(v) => {
-              if (v === 'group') Alert.alert('组号', '组号功能开发中，敬请期待');
-            }}
-            equalWidth
-          />
-        </View>
+            {/* ───── gamebar 彩种 ───── */}
+            <View style={styles.gamebar}>
+              <View style={styles.gameList}>
+                {GAMES.map((g) => {
+                  const on = gameId === g.id;
+                  return (
+                    <Pressable
+                      key={g.id}
+                      onPress={() => setGameId(g.id)}
+                      style={[styles.game, dense && styles.gameCompact, on && styles.gameOn]}
+                      accessibilityState={{ selected: on }}
+                    >
+                      <View style={[styles.gameDot, on && styles.gameDotOn]} />
+                      <Text style={[styles.gameText, dense && styles.gameTextCompact, on && styles.gameTextOn]}>
+                        {g.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => setGameMenuOpen(true)}
+                  style={[styles.gameMore, dense && styles.gameCompact]}
+                >
+                  <Text style={styles.gameMoreText}>⋯</Text>
+                </Pressable>
+              </View>
+              <StatPill>
+                <Text style={styles.statusText}>
+                  数据 <Text style={styles.statusBold}>{allRecords.length}</Text> 期 · 当前遗漏{' '}
+                  <Text style={styles.statusBold}>{currentOmission}</Text>
+                </Text>
+              </StatPill>
+            </View>
 
-        {/* ───── subtabs 子页签（吸顶可横滚） ───── */}
-        <View style={styles.subtabs}>
-          <SubTabs items={visibleTabs} value={tab} onChange={onTabChange} />
-        </View>
+            {/* ───── prinav 主导航 ───── */}
+            {!chromeHidden && (
+              <View style={styles.prinav}>
+                <Segmented
+                  options={PRINAV_OPTIONS}
+                  value={PRINAV_VALUE}
+                  onChange={(v) => {
+                    if (v === 'group') Alert.alert('组号', '组号功能开发中，敬请期待');
+                  }}
+                  equalWidth
+                />
+              </View>
+            )}
+
+            {/* ───── subtabs 子页签（吸顶可横滚） ───── */}
+            {!chromeHidden && (
+              <View style={styles.subtabs}>
+                <SubTabs items={visibleTabs} value={tab} onChange={onTabChange} />
+              </View>
+            )}
+          </>
+        )}
 
         {/* ───── content 内容区 ───── */}
         <ScrollView
@@ -1583,8 +1722,8 @@ export default function AnalyzeScreen() {
           contentContainerStyle={styles.contentInner}
           showsVerticalScrollIndicator={false}
         >
-          {/* 选号面板（收起时只留展开条） */}
-          {topCollapsed ? (
+          {/* 选号面板（收起时只留展开条；全屏时整块不渲染） */}
+          {fullscreen ? null : pickCollapsed ? (
             <Pressable onPress={() => setTopCollapsed(false)} style={styles.expandBar}>
               <Text style={styles.expandText}>▼ 展开选号</Text>
             </Pressable>
@@ -1630,11 +1769,11 @@ export default function AnalyzeScreen() {
             </Panel>
           )}
 
-          {/* 数据 / 期数面板 */}
-          <Panel label="数 据">{renderDataBar()}</Panel>
+          {/* 数据 / 期数面板（全屏时隐藏，空间全留给图表） */}
+          {!fullscreen && <Panel label="数 据">{renderDataBar()}</Panel>}
 
-          {/* 图表类型 + 图例 */}
-          {tab !== 'amp' && (
+          {/* 图表类型 + 缩放 + 图例 */}
+          {!fullscreen && tab !== 'amp' && (
             <Panel label="图 表">
               <View style={styles.chipRow}>
                 {CHART_MODES.map((c) => (
@@ -1646,6 +1785,8 @@ export default function AnalyzeScreen() {
                   />
                 ))}
               </View>
+              {/* 放大 / 缩小 / 重置 / 全屏 */}
+              {renderZoomBar()}
               <Legend
                 items={[
                   { color: palette.accent, label: '频率 / 实出' },
@@ -1658,20 +1799,23 @@ export default function AnalyzeScreen() {
 
           {/* 振幅专用图 */}
           {tab === 'amp' && (
-            <ChartCard
-              title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
-              meta={`≤ ${ampMax}`}
-            >
-              {rawData && (
-                <SkiaRawChart
-                  data={rawData}
-                  height={Math.max(chartSize.h, availH - 8)}
-                  width={chartW}
-                  title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
-                  highlightValue={ampMax}
-                />
-              )}
-            </ChartCard>
+            <View style={styles.chartCenter}>
+              {!fullscreen && renderZoomBar()}
+              <ChartCard
+                title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                meta={`≤ ${ampMax}`}
+              >
+                {rawData && (
+                  <EChartsRawChart
+                    data={rawData}
+                    height={Math.round(Math.max(chartSize.h, availH - 8) * chartZoom)}
+                    width={chartW}
+                    title={`${AMP_KEYS.find((k) => k.id === ampKey)?.label ?? ''} 走势`}
+                    yMax={ampMax}
+                  />
+                )}
+              </ChartCard>
+            </View>
           )}
 
           {loading ? (
@@ -1690,14 +1834,21 @@ export default function AnalyzeScreen() {
               <Text style={styles.hint}>请在上方选择号码</Text>
             </View>
           ) : (
-            <View style={[styles.chartsGrid, isLandscape && styles.chartsGridLandscape]}>
+            <View
+              style={[
+                styles.chartsGrid,
+                isLandscape && styles.chartsGridLandscape,
+                styles.chartCenter,
+              ]}
+            >
               {chartModes.map((m) => (
-                <View key={m} style={[styles.chartCell, isLandscape && { width: chartColW }]}>
+                // 横竖屏都是一列一表，故统一用 100% 宽度，不再按 chartColW 取半宽
+                <View key={m} style={styles.chartCell}>
                   <ChartCard title={CHART_META[m].title} meta={CHART_META[m].meta}>
                     {renderChart(
                       m,
                       chartW,
-                      chartH,
+                      Math.round(chartH * chartZoom),
                       series,
                       omissionSeries,
                       theoryMiss,
@@ -1711,18 +1862,21 @@ export default function AnalyzeScreen() {
           )}
         </ScrollView>
 
-        {/* ───── bottombar 底部操作栏 ───── */}
-        <View style={{ paddingBottom: insets.bottom }}>
-          <BottomBar
-            primaryLabel="出 图"
-            onPrimary={handleExport}
-            ghostLabel="重置"
-            onGhost={handleReset}
-            hint={`${game.name} · 集合 ${codesCount} 注 · 理论 ${theoryMiss.toFixed(2)}`}
-            vertical={isLandscape}
-          />
-        </View>
+        {/* ───── bottombar 底部操作栏（全屏时隐藏） ───── */}
+        {!fullscreen && (
+          <View style={{ paddingBottom: insets.bottom }}>
+            <BottomBar
+              primaryLabel="出 图"
+              onPrimary={handleExport}
+              ghostLabel="重置"
+              onGhost={handleReset}
+              hint={`${game.name} · 集合 ${codesCount} 注 · 理论 ${theoryMiss.toFixed(2)}`}
+              vertical={isLandscape}
+            />
+          </View>
+        )}
       </View>
+      </DensityProvider>
 
       {/* 彩种选择 / 数据任务 Modal */}
       <Modal visible={gameMenuOpen} transparent animationType="fade" onRequestClose={() => setGameMenuOpen(false)}>
@@ -1833,6 +1987,9 @@ const styles = StyleSheet.create({
   logoText: { fontWeight: '800', color: semantic.onBrand, fontSize: fs.md },
   brandTitle: { fontSize: fs.lg, fontWeight: '700', letterSpacing: 0.6, lineHeight: 20 },
   brandSub: { fontSize: fs.micro, color: semantic.textFaint, letterSpacing: 2.4 },
+  /** 横屏收起态：只剩图标高度，纵向空间全让给图表 */
+  brandCollapsed: { paddingTop: 4, paddingBottom: 4, gap: space.sm },
+  logoCollapsed: { width: 24, height: 24 },
   iconBtn: {
     minWidth: touch.min,
     minHeight: touch.min,
@@ -1871,6 +2028,9 @@ const styles = StyleSheet.create({
     backgroundColor: alpha(palette.accent, 0.18),
     borderColor: semantic.brand,
   },
+  /** 竖屏紧凑档：彩种按钮降一档，给图表腾高度 */
+  gameCompact: { paddingVertical: 5, paddingHorizontal: space.sm },
+  gameTextCompact: { fontSize: fs.xs },
   gameDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: semantic.textFaint },
   gameDotOn: { backgroundColor: semantic.brand },
   gameText: { fontSize: fs.sm, color: semantic.textDim },
@@ -1899,7 +2059,11 @@ const styles = StyleSheet.create({
 
   /* content */
   content: { flex: 1, backgroundColor: semantic.contentBg },
+  // 注意：这里不能加 alignItems:'center'，否则 Panel 等子块会收缩到内容宽度而不再撑满。
+  // 图表居中由 chartCenter 单独负责。
   contentInner: { padding: space.lg, gap: space.lg },
+  /** 图表卡片/同屏网格：占满内容宽度但整体居中 */
+  chartCenter: { width: '100%', alignItems: 'center' },
   panelRight: { fontSize: fs.micro, color: semantic.textDim },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   rowBetween: {
@@ -1954,9 +2118,41 @@ const styles = StyleSheet.create({
   kl8CellTextOn: { color: semantic.onBrand, fontWeight: '700' },
   kl8CellTextOff: { color: semantic.textFaint },
 
+  /* 图表缩放 / 全屏 */
+  /** 缩放操作条：− / 百分比 / + / 重置 / 全屏 */
+  zoomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: space.sm,
+    marginBottom: space.sm,
+  },
+  zoomText: {
+    minWidth: 46,
+    textAlign: 'center',
+    fontSize: fs.xs,
+    color: semantic.textDim,
+    fontWeight: '700',
+  },
+  /** 全屏态顶部细条：只放标题 + 缩放操作 */
+  fsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: 4,
+    backgroundColor: semantic.contentBg,
+  },
+  fsTitle: { flex: 1, fontSize: fs.xs, color: semantic.textDim, fontWeight: '600' },
+
   /* charts */
+  /**
+   * 多图（频率K / 遗漏K / 遗漏图 / 二阶遗漏）同屏显示。
+   * 横竖屏都保持一列一表：图表种类不多，竖着排每张都能占满宽度，
+   * 两列会把每张压窄一半、K 线挤成一团。
+   */
   chartsGrid: { flexDirection: 'column', gap: space.lg },
-  chartsGridLandscape: { flexDirection: 'row', flexWrap: 'wrap' },
+  chartsGridLandscape: { flexDirection: 'column', gap: space.md },
   chartCell: { width: '100%' },
   centerBox: {
     minHeight: 160,

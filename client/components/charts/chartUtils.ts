@@ -36,6 +36,19 @@ export function buildTicks(max: number, tickCount = 5): number[] {
   return ticks;
 }
 
+/** 简单移动均线：前 period-1 个位置返回 null（数据不足） */
+export function movingAverage(values: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = [];
+  if (period <= 0) return values.map(() => null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    sum += values[i];
+    if (i >= period) sum -= values[i - period];
+    out.push(i + 1 < period ? null : sum / period);
+  }
+  return out;
+}
+
 /** 将点序列转为折线 Path 的 d 属性（跳过 null 点） */
 export function buildLinePath(
   points: { x: number; y: number | null }[],
