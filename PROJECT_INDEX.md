@@ -1,20 +1,16 @@
-```bash
-cd ~/qm3/lottery-trend-app
-
-cat > PROJECT_INDEX.md << 'MDEOF'
 # 彩票趋势分析 APP —— 项目索引
 
 > 给 AI 的上下文恢复文档。新对话开头贴这份内容，即可恢复项目全貌。
-> 最后更新：2026-10-10
+> 最后更新：2026-10-11
 
 ---
 
 ## 0. 一句话概述
 
-Expo + React Native + TypeScript 手机 App，模仿「奇妙三数字趋势分析」，
-支持 **福彩3D / 排列3 / 排列5 / 快乐8** 四种彩种，含趋势分析、胆拖组号、缩水、K线图。
+Expo + React Native + TypeScript 手机 App，模仿「奇妙三数字趋势分析 / 慧眼彩票趋势分析系统」，
+支持 **福彩3D / 排列3 / 排列5 / 快乐8** 四种彩种，含趋势分析、K线家族、胆拖组号、缩水、选号工具、副图指标。
 
-- **技术栈**：Expo 54 + RN 0.81 + expo-router + @shopify/react-native-skia + ECharts(WebView 内联) + expo-sqlite + uniwind(Tailwind) + TypeScript
+- **技术栈**：Expo 54 + RN 0.81 + expo-router + ECharts(WebView 内联) + expo-sqlite + uniwind(Tailwind) + TypeScript
 - **运行环境**：Termux (Android aarch64)，`qs` 快捷命令启动 Expo Go
 - **项目路径**：`~/qm3/lottery-trend-app`（monorepo: client + server）
 - **主要工作目录**：`~/qm3/lottery-trend-app/client`
@@ -36,35 +32,44 @@ Expo + React Native + TypeScript 手机 App，模仿「奇妙三数字趋势分�
 ## 2. 目录结构（只列关键文件）
 
 ```
-
 client/
-├── app/(tabs)/_layout.tsx       # 底部 Tab（分析 / 组号 ▲），组号 Tab 点击弹彩种菜单
+├── app/(tabs)/_layout.tsx       # Stack 导航（无底部 tab 栏，路由全保留）
 ├── app/(tabs)/index.tsx          # Redirect → /(tabs)/analyze（启动页）
 ├── app/(tabs)/analyze.tsx        # → screens/analyze
-├── app/(tabs)/shrink.tsx         # → screens/shrink（3D 缩水）
+├── app/(tabs)/shrink.tsx         # → screens/shrink（3D 缩水，入口在分析屏更多菜单「组号」）
 ├── app/(tabs)/pl5-shrink.tsx     # → screens/shrink/pl5
-├── app/(tabs)/kl8-shrink.tsx     # → screens/shrink/kl8（占位）
-├── screens/analyze/index.tsx     # ★ 主页分析（~1900 行，最大）
-├── screens/shrink/index.tsx      # ★ 3D 缩水（607 行）
-├── screens/shrink/pl5.tsx        # PL5 缩水（独立）
+├── app/(tabs)/kl8-shrink.tsx     # → screens/shrink/kl8
+├── screens/analyze/index.tsx     # ★ 主页分析（最大，~3000 行）
+├── screens/shrink/index.tsx      # ★ 3D 缩水
+├── screens/shrink/pl5.tsx        # PL5 缩水
+├── screens/shrink/kl8.tsx        # KL8 缩水（占位）
 ├── components/charts/
-│   ├── EChartsFreqKChart.tsx     # ★ 频率K线（ECharts custom）
+│   ├── chartMath.ts              # ★★ 核心算法：aggregate/布林/二阶概率/出次/遗漏和
+│   ├── EChartsFreqKChart.tsx     # ★ 频率K线（OHLC+影线+周期+布林+overlay）
 │   ├── EChartsOmissionChart.tsx  # ★ 遗漏图（一阶/二阶/双联）
-│   ├── EChartsOmissionKChart.tsx # ★ 遗漏K线
-│   ├── SkiaRawChart.tsx          # ★ 振幅图（Skia + highlightValue）
-│   └── EChartsRawChart.tsx       # ECharts 原始值（备用）
+│   ├── EChartsOmissionKChart.tsx # ★ 遗漏K线（二阶概率档位+预先阴线）
+│   ├── EChartsChuciChart.tsx     # 出次图 / 出次移动统计
+│   ├── EChartsMissSumChart.tsx   # 遗漏和（组选/全胆/直选三口径）
+│   ├── EChartsKl8Heatmap.tsx     # 快乐8 分布图形热力图（80号）
+│   ├── MultiPaneChart.tsx        # 主图+副图同 WebView 多 grid（指标叠加）
+│   └── EChartsRawChart.tsx       # 原始值走势（振幅等）
+├── components/ui/
+│   ├── Kit.tsx                   # Chip/Panel/Segmented/ChartCard/TongGrid 等
+│   ├── PickSheet.tsx             # ★ 纯JS抽屉（三态：收起/悬停/满屏88%）
+│   ├── BackBar.tsx               # 自绘返回行（无 tab 栏后的返回入口）
+│   └── IndicatorPanel.tsx        # 副图指标设置弹窗
+├── lib/charts/indicators.ts      # ★ MACD/KDJ/RSI/CCI/ADX/SAR（Wilder TR 口径）
 ├── lib/lottery/
-│   ├── targets.ts                # ★★ 分析目标 + 概率（~600 行，核心）
+│   ├── targets.ts                # ★★ 分析目标 + 概率（核心）
 │   ├── analysis.ts               # 分析纯函数
-│   ├── filters.ts                # ★ 3D 组号筛选（179 行）
-│   ├── danTuo.ts                 # 3D 胆拖算法
+│   ├── filters.ts                # ★ 3D 组号筛选
+│   ├── danTuo.ts                 # 胆拖（支持任意位数 D）
 │   ├── datasource.ts             # ★ 数据源（17500 + 中彩网 + SQLite）
 │   ├── db.ts                     # ★ SQLite 持久化（多源校验）
 │   ├── games.ts                  # 彩种定义（fc3d/pl3/pl5/kl8）
 │   └── seed.ts                   # 种子数据兜底
 ├── hooks/useLottery.ts           # 数据加载 hook（含 allRecords）
 └── lib/echartsSource.ts          # ★ 1MB 内联 ECharts 源（离线用）
-
 ```
 
 ---
@@ -73,7 +78,7 @@ client/
 
 ### 3.1 `lib/lottery/targets.ts` —— 分析目标抽象
 
-**Target 类型（7 种）**：
+**Target 类型（8 种）**：
 ```ts
 type Target =
   | { kind: 'digit'; digit; pos }                    // 数字 + 位置
@@ -99,10 +104,10 @@ type Target =
 · isHit(record, target, prevRecord?) 命中判定
 · getProbability(target, V, D, samplingMode) 理论概率
 · getTheoryMiss(target, V, D, mode) 理论遗漏 = (1-p)/p
-· buildTargetSeries(records, target, V, D, mode) → TargetPoint[]
+· buildTargetSeries(records, target, V, D, mode) → TargetPoint[]（p/diff/omission/score 四序列）
 · buildRawSeries(records, calcKey) 原始值序列
 · buildShapeCodes(digits, mainMode, shapeFilters) 3D 形态集合
-· getTargetLabel(target) / getTargetShortLabel(target)
+· getTargetLabel(target) / getTargetShortLabel(target) / posIndex(pos, digitCount)
 
 概率公式：
 
@@ -114,145 +119,105 @@ type Target =
 · 福彩3D 独胆 = 2.69
 · 快乐8 单号 = 3.0
 
-3.2 图表组件（4 种 ECharts + 1 种 Skia）
+### 3.2 `components/charts/chartMath.ts` —— 核心算法（官方口径）
+
+· aggregate(series, period, align) → OHLC K线聚合（前收=后开，左右对齐）
+· buildBoll / lastBollTriple —— 布林带（频率K右上角 上/中/下轨）
+· getSecondOrderProbability(p) → p₂ = 1−(1−p)^(floor((1−p)/p)+1)
+· secondOrderFromTheory(tMiss)
+· buildOmissionBars(series, theoryMiss, p2) → 遗漏K线（红 1/p₂−1、绿恒定 −1，支持 pending 阴线）
+· buildChuciSeries / buildChuciMoveSeries → 出次图/出次移动统计
+· missSumDropRate + MISS_SUM_REF=11 → 遗漏和（组选口径「≥11 下期 90% 回落」）
+
+### 3.3 `lib/charts/indicators.ts` —— 副图指标
+
+· calcMacd —— 去掉 ×2（官方口径：dif−dea）
+· calcAdx/DMI —— Wilder TR（max(H−L,|H−PC|,|L−PC|)）
+· calcRsi（无波动返 50）/ calcKdj / calcCci / calcSar（方向由前两期走势定）
+
+### 3.4 图表组件
 
 EChartsFreqKChart（频率K线）：
-
-· Y = diff（累计实出 - 累计理论）
-· 无影线蜡烛（custom renderItem）
-· 布林通道 MA20±2σ
-· 顶部 graphic 悬浮标题：targetLabel + 走势
-
-EChartsOmissionKChart（遗漏K线）：
-
-· 只在开出期画柱（石头剪刀布爬楼梯）
-· 高度逻辑：遗漏≤T→红+1；T<M≤2T→青-1；...
+· Y = diff（累计实出 − 累计理论）；无影线（单期）/ OHLC+影线（周期）
+· 布林通道 MA20±2σ；overlay: 'none'|'split'（黄金分割）|'equal'（四等分）
 · 顶部 graphic 悬浮标题
 
+EChartsOmissionKChart（遗漏K线）：
+· 只在开出期画柱；红 1/p₂−1、绿 −1；pending 阴线半透明+虚线
+· overlay 水平参考线
+
 EChartsOmissionChart（遗漏图，一阶/二阶/双联）：
+· mode: 'both' | 'level1' | 'level2'；球按"开出事件"画（非每期）
+· MA5/10/20 按开出序列计算，起点延伸；MAX_SHOW = 1000
+· overlay 水平参考线
 
-· mode: 'both' | 'level1' | 'level2'
-· 球按"开出事件"画（不是每期都画）
-  · 每球 y = 该次开出的遗漏值（距上次开出的期数）
-  · 结尾追加"当前期"蓝球 + ? 紫球
-  · 从右数第 5/10/20 个球 → 蓝/绿/紫标记（MA 起点）
-· MA5/10/20 按"开出序列"计算，起点延伸（前 N-1 位置用现有球平均）
-· MAX_SHOW = 1000（超出截断）
-· 一阶标题：{targetLabel}  一阶遗漏图（历史最大: 出次: 平均: 理论: 当前:）
-· 二阶标题：{targetLabel}  二阶遗漏图（遗漏范围 X-Y）
-· 折线延伸到 ? 球位置
+EChartsChuciChart（出次图/出次移动统计）：
+· 红圈曲线 + 5/10/25 均线 + 拐点值
 
-SkiaRawChart（振幅图）：
+EChartsMissSumChart（遗漏和）：
+· 组选/全胆/直选三口径，参考线可配置（refValue/tip）
 
-· 每期一球 + 折线 + MA5/10/20 + 总平均线（黑实线）
-· highlightValue：只画 value === highlightValue 的球（折线全画）
-· 悬浮标题：{targetLabel}  {title}（历史平均:X 当前:Y）
+EChartsKl8Heatmap（快乐8 分布图形）：
+· 80 号 8×10 热力图，双口径：近N期出现次数 / 当前遗漏
 
-ECharts 离线：
+MultiPaneChart：
+· 主图（频率K/遗漏K）+ 副图（MACD/KDJ/RSI/CCI/ADX/SAR）同 WebView 多 grid，x 轴天然对齐
 
-· 源码内联在 lib/echartsSource.ts（1MB），不依赖 CDN
+### 3.5 screens/analyze/index.tsx —— 主页分析（~3000 行）
 
-3.3 screens/analyze/index.tsx —— 主页分析（~1900 行）
+**布局（对齐慧眼参考图）**：
+- 顶栏单行：`位置▼ | 彩种▼ | 期数 | 奖 | ＋`
+- 底部固定图型栏：`频率K 遗漏图 遗漏K 指标 出次 周期 同屏 •••`（zIndex 30 压在抽屉上）
+- 「•••」更多菜单：补充图型（二阶遗漏/出次移动/遗漏和/分布）、缩放/全屏/出图/重置、**组号**（跳缩水屏）
+- 选号抽屉（PickSheet 三态：收起/悬停/满屏88%）：把手下方固定「常用/系统/定制」分组行，内容可滚
 
-顶部工具栏（renderTabBar）：
+**图型模式（ChartMode，8 种）**：freq / omissionLine / omissionLine2 / omissionK / chuci / chuciMove / missSum / kl8dist
 
-```
-[彩种▼] [Tab1] [Tab2] ... | 形态 [组选] [组三] [组六] | [期数] [应用] [刷新] [状态]
-```
+**选号 Tab（数字彩）**：常用 / 毒胆 / 胆拖 / 定位 / 复式 / 胆合积跨 / 振幅 / 组内随机 / 随机交并 / 分组胆
+**KL8 Tab**：常用 / 组合 / 复式 / 连号 / 胆拖
 
-3D / PL3 Tabs：常用 / 毒胆 / 胆拖 / 定位 / 复式 / 胆合积跨 / 振幅 / 组内随机 / 随机交并 / 分组胆
-KL8 Tabs：常用 / 组合 / 复式 / 连号 / 胆拖
+各 Tab target 要点：
+- 毒胆：matchFilterFast（循环外预计算目标集，D=5 十万次枚举零分配——切彩种卡死已修复）
+- 胆拖：generateDanTuo(dan, tuo, D)（任意位数）
+- 复式：定位笛卡尔积 / 不定位 noposNums
+- 组内随机/随机交并/分组胆：已实现（产出可分析集合）
+- 粘贴导入：解析号码串按毒胆方式切入分析
 
-各 Tab target：
+**胆码同屏（毒胆 Tab）**：
+- 竖屏 2 列×5 行网格（点单格放大）
+- 每格头部三行：`毒胆·N·直选X注 | 更多` / `图型▾ | MA摘要 | 查看号码` / `遗漏周期·当前遗漏·概率`
+- 图型▾ 下拉：频率K/遗漏图/遗漏K（独立于全局图型栏）
+- 更多竖排菜单：号码/复制/加入缩水/分割/等分/二阶
+- 分割=黄金分割、等分=四等分 → 图表水平参考线（overlay prop）
 
-Tab 说明
-常用 3D: 数字/前二/后二；KL8: 数字网格 + 尾号/012路/4区/8区
-毒胆 按类型（开奖号/对码/两码合/两码差/两码跨）筛选 1000 号
-胆拖 3D: generateDanTuo；有类型行
-定位 digit + pos（3D: 百十个；PL5: 万千百十个）
-复式 定位（笛卡尔积）/ 不定位（noposNums）
-胆合积跨 calcAttr
-振幅 buildRawSeries + SkiaRawChart + highlightValue
-KL8 组合 kl8Combo（全中/任意/中N个，号码多选最多 20，N 1~10）
-KL8 复式 kl8Fushi（玩法 选1~选10）
-KL8 连号 类型（连/奇/偶/质/合/0路/1路/2路）+ 长度 2~8
-KL8 胆拖 胆（最多9）+ 拖，中N个多选
+**周期/窗口记忆**：
+- 记忆键 = `页签:图型`（如 `dan:freq`）
+- 期数/分析窗口输入框按图型各自记住（frequencyK 记 80、遗漏图记 300 互不干扰）
+- 周期 Chip（1~20）同样按图型分别记忆
+- 切图型/切页签自动恢复；应用后写入
 
-形态模式（仅 3D/PL3）：
+**形态模式（仅 3D/PL3）**：组选（主模式）/ 组三/组六（过滤），未选=直选
 
-· 不点任何形态 = 默认直选
-· 组选（toggle 主模式）：命中判定排序后比较
-· 组三/组六（多选 filter）：
-  · 未选组选时 = 直选 + 组三/组六过滤（展开成直选排列）
-  · 选了组选时 = 组选 + 组三/组六过滤（排序形式）
-· 数字来源按 Tab 提取：
-  · 毒胆 → dan
-  · 胆拖 → dtDan + dtTuo
-  · 常用 → commonDigit（单数字）
-  · 定位 → posDigit
-  · 复式 → multiMode==='pos' ? bai+shi+ge : noposNums
-· 不选数字 = 全 0-9
-· buildShapeCodes(digits, mainMode, shapeFilters)
+### 3.6 lib/lottery/datasource.ts —— 数据源
 
-同屏功能（毒胆 Tab）：
-
-· 5×2 网格，点小图满屏，顶部可收起
-
-每个 tab 独立期数：
-
-· countMap: Record<TabId, number>（默认 common/dan/... 500，amp 80，kl8* 200）
-· 切 Tab 时输入框同步为该 Tab 值
-
-彩种下拉（点「彩种▼」）：
-
-· 福彩3D / 排列3 / 排列5 / 快乐8
-· 全量数据（绿）→ 重新拉全量 + 多源校验
-· 校验数据（紫）→ 本地 vs 远程对比，标冲突
-
-3.4 lib/lottery/datasource.ts —— 数据源
-
-数据来源：
-
-彩种 主源 备源
-fc3d 17500 3d_asc.txt 中彩网 API（最多 100 期）
-pl3 17500 pl3_asc.txt 无
-pl5 17500 pl5_asc.txt 无
-kl8 中彩网 API（2000 期） 无
-
-API：
+| 彩种 | 主源 | 备源 |
+|------|------|------|
+| fc3d | 17500 3d_asc.txt | 中彩网 API（最多 100 期） |
+| pl3 | 17500 pl3_asc.txt | 无 |
+| pl5 | 17500 pl5_asc.txt | 无 |
+| kl8 | 中彩网 API（2000 期） | 无 |
 
 · loadHistory(gameId, count) → { records, allRecords, source }
-· refreshHistory(gameId, count) → 增量刷新（fc3d/kl8 走中彩网 100 期，其他降级全量）
-· fetchAllAndVerify(gameId, onProgress) → 备份 + 拉全量 + 双源校验 + 写库
-· verifyLocalData(gameId, onProgress) → 只校验本地
-· fetchFullHistory(gameId) → 拉全量（含 17500 → 中彩网 → seed 三级 fallback）
+· refreshHistory / fetchAllAndVerify / verifyLocalData / fetchFullHistory（三级 fallback）
+· AsyncStorage 缓存（TTL 6h）+ SQLite 主存储
 
-缓存：
+### 3.7 lib/lottery/db.ts —— SQLite 持久化
 
-· AsyncStorage key = lottery_history_v2_{gameId}（TTL 6h，作为 SQLite 的补充）
-· SQLite 是主存储（永久保留）
+· draws / draws_backup / conflicts 三表
+· 串行队列 enqueue + withRetry（database is locked 重试 8 次）
+· 不用事务（expo-sqlite 新版事务 API 有锁库/NPE bug）
 
-3.5 lib/lottery/db.ts —— SQLite 持久化
-
-表：
-
-· draws(game_id, issue, date, nums, source, verified, updated_at) 主表
-· draws_backup 备份表（全量刷前备份，成功删）
-· conflicts(game_id, issue, nums_a, nums_b, source_a, source_b, created_at)
-
-关键设计：
-
-· 串行队列 enqueue + withRetry（遇 database is locked 重试 8 次，间隔 150ms）
-· 不用事务（withExclusiveTransactionAsync 会 NPE，withTransactionAsync 会锁库）
-· 所有写操作走 enqueue 串行化
-
-导出：
-
-· upsertDraws / getAllDraws / countDraws
-· backupDraws / restoreBackupDraws / dropBackupDraws
-· addConflict / countConflicts
-
-3.6 lib/lottery/games.ts
+### 3.8 lib/lottery/games.ts
 
 ```ts
 FC3D: 福彩3D  (digitCount: 3, digitMin: 0, digitMax: 9)
@@ -263,52 +228,55 @@ KL8:  快乐8   (digitCount: 20, digitMin: 1, digitMax: 80)
 
 ---
 
-4. 关键决策
+## 4. 关键决策
 
-决策 原因
-图表用 ECharts + WebView Skia 手写效果差
-ECharts 内联到 lib/echartsSource.ts 离线 APK 不依赖 CDN
-遗漏图球按"开出事件"画 参考图设计：每球代表一次开出
-超几何概率（KL8） 20 个号不重复，非独立抽样
-SQLite 不用事务 expo-sqlite 新版事务 API 有 bug（锁库/NPE）
-串行队列 + 重试 避免 database is locked
-形态按钮两组独立 直选/组选（主模式），组三/组六（过滤）
-组选统一用排序形式 概率按覆盖率（组三覆盖3，组六覆盖6）
-每个 Tab 独立期数 振幅用 80，其他用 500
-彩种 Tab 按 gameId 过滤 KL8 专属 Tab 不给 3D 显示
-主源优先 + 备源校验 17500 挂时用中彩网，冲突记 conflicts 表
+| 决策 | 原因 |
+|------|------|
+| 图表用 ECharts + WebView | Skia 手写效果差 |
+| ECharts 内联 lib/echartsSource.ts | 离线不依赖 CDN |
+| 遗漏图球按"开出事件"画 | 参考图设计 |
+| 超几何概率（KL8） | 20 号不重复，非独立抽样 |
+| SQLite 不用事务 + 串行队列重试 | 避免 database is locked |
+| 二阶概率 p₂ = 1−(1−p)^(floor((1−p)/p)+1) | 官方二阶遗漏口径 |
+| 遗漏K线红 1/p₂−1、绿 −1 | 官方档位口径（官方原文/界面百分比/像素比三点互证） |
+| ADX/DMI 用 Wilder TR | 与官方截图吻合到 2 位小数 |
+| MACD 去掉 ×2 | 与官方原文一致 |
+| 抽屉纯 JS（Animated+PanResponder） | Expo Go 下 reanimated/gesture-handler 版本写死会崩 |
+| 抽屉三态：收起/悬停/满屏88% | 官方交互（满屏即原 88%） |
+| 底部无 tab 栏（Stack 导航） | 官方全屏分析布局，组号入口移到更多菜单 |
+| 每个 Tab+图型独立期数/周期 | 不同图表各自记忆分析窗口 |
+| 毒胆枚举循环外预计算 | 排列五 D=5 十万次枚举，消除每号建 Set 卡顿 |
 
 ---
 
-5. 已完成 / 未完成
+## 5. 已完成 / 未完成
 
 ✅ 已完成
 
-· 数据层：17500 + 中彩网 + SQLite 持久化 + 多源校验
-· 彩种：福彩3D / 排列3 / 排列5（分析页）/ 快乐8（完整）
-· 图表：频率K线 / 遗漏K线 / 遗漏图（一阶/二阶/双联）/ 振幅图
-· 分析页：10 + 5 Tab（3D 10个，KL8 5个）
-· 形态按钮（仅3D/PL3）：组选/组三/组六 + 多选
-· 组号页：3D 完整 + PL5 基础
-· 每个 Tab 独立期数 + 状态栏显示
-· 顶部悬浮标题（4 张图）
-· 振幅 highlightValue
-· GitHub Actions 双构建（dev + release）
-· 快捷命令
+- 数据层：17500 + 中彩网 + SQLite + 多源校验
+- 彩种：福彩3D / 排列3 / 排列5 / 快乐8（全四位支持）
+- K线家族：频率K / 遗漏K / 遗漏图（一阶/二阶/双联）/ 出次图 / 出次移动 / 遗漏和 / 周期K线 / 快乐8分布热力图
+- 副图指标：MACD/KDJ/RSI/CCI/ADX/SAR（Wilder 口径）+ MA 参数
+- 排列五五位全维度（毒胆/胆拖/复式 D 位通用枚举，两码合差全组合）
+- 选号工具：组内随机 / 随机交并 / 分组胆 / 粘贴导入
+- 胆码同屏：2 列网格 + 每格图型下拉 + 更多菜单（号码/复制/加入缩水/分割/等分/二阶）
+- 形态按钮（仅3D/PL3）
+- 抽屉三态 + 固定分组行 + 周期记忆
+- 底部无 tab 栏，组号入口入更多菜单
+- GitHub Actions 双构建 + 快捷命令
 
 ❌ 未完成
 
-· 快乐8 选一~选十回测（下一步）
-· 快乐8 组号缩水
-· 组内随机 / 随机交并 / 分组胆（占位 Tab）
-· MA/EMA/BOLL 参数可配置
-· MACD/RSI/KDJ 副图
-· CCI/SAR/ADX 副图 + 指标设置弹窗
-· 打包 APK 到应用商店
+- 快乐8 选一~选十回测
+- 快乐8 组号缩水
+- K线家族剩余：连出K线 / 连出遗漏K线 / 号内趋势 / 大盘K线
+- 统计分析与图表：分布图形/扫描图/遗漏统计搜索/遗漏出次统计出号/极冷极热出号（快乐8 分布热力图已做一部分）
+- MA/EMA/BOLL 参数可配置
+- 打包 APK 到应用商店
 
 ---
 
-6. 常用命令
+## 6. 常用命令
 
 ```bash
 # 启动
@@ -327,67 +295,46 @@ npm install <pkg> --no-save --legacy-peer-deps --ignore-scripts --registry=https
 
 已知依赖坑：
 
-· metro / metro-cache / metro-config / metro-transform-worker / metro-core / metro-resolver @0.83.8（uniwind 需要）
-· react-refresh@0.14.2（babel-preset-expo 需要）
-· expo-sqlite@~16.0.10（Expo 54 内置版本）
-· 这些包建议写进 package.json（否则被 npm 清掉）
+- metro / metro-cache / metro-config / metro-transform-worker / metro-core / metro-resolver @0.83.8（uniwind 需要）
+- react-refresh@0.14.2（babel-preset-expo 需要）
+- expo-sqlite@~16.0.10（Expo 54 内置版本）
 
 ---
 
-7. 已知坑
+## 7. 已知坑
 
-问题 解决
---tunnel 报 ERR_INVALID_ARG_TYPE ngrok 在 Termux 崩溃，改用 LAN 或 cloudflared
-Expo Go 连不上 Metro Android 网络隔离，需 Expo Go 模式 + LAN IP（REACT_NATIVE_PACKAGER_HOSTNAME）
-database is locked 不用事务 + 串行队列 + withRetry
-metro-cache/private/stores/FileStore 找不到 手动 npm install metro-cache@0.83.8
-pnpm 在 Termux 报 flock 错误 用 npm 旁路装 --no-save
-GitHub push 失败 HTTPS 被墙，用 SSH git@github.com:vauy/lottery-trend-app.git
-.bak 文件被提交 已加 *.bak* 到 .gitignore
-
----
-
-8. 下一步方向
-
-立即做：快乐8 选一~选十回测
-
-· 新增「回测」Tab（仅快乐8）
-· 玩法选择（选一~选十）
-· 号码多选（最多 10 个）
-· 输出：
-  · 命中分布柱状图
-  · 官方奖金表（选一 4.6 元 ~ 选十 500 万）
-  · 期望收益 / 回报率
-  · 累计盈亏折线
-
-后续：
-
-· 快乐8 组号缩水
-· 组内随机 / 随机交并 / 分组胆
-· MA/EMA/BOLL 参数可配置
-· MACD/RSI/KDJ 副图
-· CCI/SAR/ADX + 指标设置弹窗
+| 问题 | 解决 |
+|------|------|
+| --tunnel 报 ERR_INVALID_ARG_TYPE | ngrok 在 Termux 崩溃，改用 LAN 或 cloudflared |
+| Expo Go 连不上 Metro | 用 Expo Go 模式 + LAN IP（REACT_NATIVE_PACKAGER_HOSTNAME） |
+| database is locked | 不用事务 + 串行队列 + withRetry |
+| metro-cache FileStore 找不到 | 手动 npm install metro-cache@0.83.8 |
+| pnpm 在 Termux 报 flock | 用 npm 旁路装 --no-save |
+| github.com:443 不可达（沙箱） | 用 GitHub Git Data API（gh auth token）推送提交 |
+| WebView 永远盖住普通 View | 浮层 zIndex/elevation 提层并在 WebView 之后渲染 |
+| 切彩种卡死 | 毒胆枚举循环外预计算 + 切彩种清同屏状态收抽屉 |
 
 ---
 
-9. 恢复对话
+## 8. 下一步方向
+
+- 快乐8 选一~选十回测（玩法选择 + 命中分布 + 奖金表 + 期望收益）
+- 快乐8 组号缩水
+- K线家族补全：连出K线 / 连出遗漏K线 / 号内趋势 / 大盘K线
+- MA/EMA/BOLL 参数可配置
+
+---
+
+## 9. 恢复对话
 
 新对话第一句：
 
 ```
 读这个文件了解项目：[粘贴本文件内容]
 
-当前进度：快乐8 数据层 + 5 个 Tab 完成，SQLite 持久化完成，
-形态按钮完成。git 最新 fc34c72。
+当前进度：数据层 + 四彩种 + K线家族（8 图型）+ 副图指标 + 排列五五位全维度 +
+选号工具 + 胆码同屏下拉 + 抽屉三态 + 周期记忆 全部完成；底部无 tab 栏，
+组号入口在更多菜单。git 最新 3c49940。
 
 现在要做：<你的需求>
 ```
-
-MDEOF
-
-wc -l PROJECT_INDEX.md
-head -20 PROJECT_INDEX.md
-
-```
-
-跑完贴输出。
