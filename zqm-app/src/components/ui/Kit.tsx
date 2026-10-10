@@ -69,22 +69,27 @@ export function Panel({
   children,
   style,
   bodyStyle,
+  compact,
 }: {
   title?: string;
   extra?: React.ReactNode;
   children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   bodyStyle?: StyleProp<ViewStyle>;
+  /** 紧凑模式（横屏侧栏用）：标题行与内边距减半 */
+  compact?: boolean;
 }) {
   return (
     <View style={[styles.panel, style]}>
       {title ? (
-        <View style={styles.panelHead}>
-          <Text style={styles.panelTitle}>{title}</Text>
+        <View style={[styles.panelHead, compact && styles.panelHeadCompact]}>
+          <Text style={[styles.panelTitle, compact && styles.panelTitleCompact]} numberOfLines={1}>
+            {title}
+          </Text>
           {extra}
         </View>
       ) : null}
-      <View style={[{ padding: space.md }, bodyStyle]}>{children}</View>
+      <View style={[{ padding: compact ? space.sm : space.md }, bodyStyle]}>{children}</View>
     </View>
   );
 }
@@ -101,14 +106,17 @@ export function Segmented<T extends string>({
   value,
   onChange,
   style,
+  compact,
 }: {
   options: Array<SegmentedOption<T>>;
   value: T;
   onChange: (v: T) => void;
   style?: StyleProp<ViewStyle>;
+  /** 紧凑模式（横屏侧栏用）：允许换行、减小左右内边距 */
+  compact?: boolean;
 }) {
   return (
-    <View style={[styles.segmented, style]}>
+    <View style={[styles.segmented, compact && styles.segmentedCompact, style]}>
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -117,11 +125,17 @@ export function Segmented<T extends string>({
             onPress={() => onChange(opt.value)}
             style={({ pressed }) => [
               styles.segItem,
+              compact && styles.segItemCompact,
               active && styles.segItemActive,
               pressed && { opacity: 0.75 },
             ]}
           >
-            <Text style={[styles.segText, active && styles.segTextActive]}>{opt.label}</Text>
+            <Text
+              style={[styles.segText, compact && styles.segTextCompact, active && styles.segTextActive]}
+              numberOfLines={1}
+            >
+              {opt.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -138,6 +152,7 @@ export function Chip({
   onPress,
   style,
   disabled,
+  compact,
 }: {
   label: string;
   active?: boolean;
@@ -146,6 +161,8 @@ export function Chip({
   style?: StyleProp<ViewStyle>;
   /** 置灰不可点（如快乐8 下不支持的功能入口） */
   disabled?: boolean;
+  /** 紧凑模式（横屏侧栏用）：减小内边距与圆角 */
+  compact?: boolean;
 }) {
   const tint = color ?? semantic.brand;
   return (
@@ -154,6 +171,7 @@ export function Chip({
       disabled={disabled}
       style={({ pressed }) => [
         styles.chip,
+        compact && styles.chipCompact,
         active && !disabled && { backgroundColor: alpha(tint, 0.18), borderColor: tint },
         pressed && !disabled && { opacity: 0.75 },
         disabled && { opacity: 0.35, borderColor: semantic.panelBorder },
@@ -163,9 +181,11 @@ export function Chip({
       <Text
         style={[
           styles.chipText,
+          compact && styles.chipTextCompact,
           active && !disabled && { color: tint },
           disabled && { color: semantic.textFaint },
         ]}
+        numberOfLines={1}
       >
         {label}
       </Text>
@@ -305,11 +325,24 @@ export function Field({
   label,
   children,
   style,
+  compact,
 }: {
   label: string;
   children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  /** 紧凑模式（横屏侧栏用）：标签在左上、控件占满整行 */
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <View style={[styles.fieldStack, style]}>
+        <Text style={[styles.fieldLabel, styles.fieldLabelCompact]} numberOfLines={1}>
+          {label}
+        </Text>
+        <View style={{ alignSelf: 'stretch' }}>{children}</View>
+      </View>
+    );
+  }
   return (
     <View style={[styles.field, style]}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -383,10 +416,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: semantic.panelBorder,
   },
+  panelHeadCompact: {
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs,
+  },
   panelTitle: {
     color: semantic.text,
     fontSize: fontSize.md,
     fontWeight: '600',
+  },
+  panelTitleCompact: {
+    fontSize: fontSize.sm,
+    flexShrink: 1,
   },
   segmented: {
     flexDirection: 'row',
@@ -395,6 +436,11 @@ const styles = StyleSheet.create({
     padding: 3,
     borderWidth: 1,
     borderColor: semantic.panelBorder,
+  },
+  segmentedCompact: {
+    flexWrap: 'wrap',
+    padding: 2,
+    gap: 2,
   },
   segItem: {
     flexGrow: 1,
@@ -405,6 +451,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: radius.sm - 2,
   },
+  segItemCompact: {
+    minHeight: 28,
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
+    paddingHorizontal: space.sm,
+    borderRadius: 4,
+  },
   segItemActive: {
     backgroundColor: semantic.brand,
   },
@@ -412,6 +466,9 @@ const styles = StyleSheet.create({
     color: semantic.textDim,
     fontSize: fontSize.sm,
     fontWeight: '600',
+  },
+  segTextCompact: {
+    fontSize: fontSize.xs,
   },
   segTextActive: {
     color: semantic.onBrand,
@@ -426,10 +483,18 @@ const styles = StyleSheet.create({
     borderColor: semantic.panelBorder,
     backgroundColor: semantic.controlBg,
   },
+  chipCompact: {
+    minHeight: 28,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
+  },
   chipText: {
     color: semantic.textDim,
     fontSize: fontSize.sm,
     fontWeight: '600',
+  },
+  chipTextCompact: {
+    fontSize: fontSize.xs,
   },
   digitGrid: {
     flexDirection: 'row',
@@ -489,10 +554,17 @@ const styles = StyleSheet.create({
     paddingVertical: space.xs,
     gap: space.sm,
   },
+  fieldStack: {
+    paddingVertical: space.xs,
+    gap: 3,
+  },
   fieldLabel: {
     color: semantic.textDim,
     fontSize: fontSize.sm,
     flexShrink: 0,
+  },
+  fieldLabelCompact: {
+    fontSize: fontSize.xs,
   },
   input: {
     minHeight: touch.sm,

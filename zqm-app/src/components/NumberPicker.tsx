@@ -18,6 +18,8 @@ export interface NumberPickerProps {
   /** 单选模式：点击直接替换选中（K 线分析用） */
   single?: boolean;
   landscape?: boolean;
+  /** 紧凑模式（横屏侧栏 / 横屏顶栏用）：格子更小、不显示底部操作条 */
+  compact?: boolean;
   /** 高度上限（快乐8 号码多时需要限制高度） */
   maxHeight?: number;
 }
@@ -28,6 +30,7 @@ export function NumberPicker({
   onChange,
   single = false,
   landscape = false,
+  compact = false,
   maxHeight,
 }: NumberPickerProps) {
   const digits = useMemo(() => {
@@ -37,8 +40,8 @@ export function NumberPicker({
   }, [game]);
 
   const isLarge = digits.length > 20;
-  const columns = isLarge ? (landscape ? 12 : 8) : 6;
-  const size = isLarge ? (landscape ? 38 : 36) : landscape ? 46 : 44;
+  const columns = isLarge ? (compact ? 10 : landscape ? 12 : 8) : compact ? 10 : 6;
+  const size = isLarge ? (compact ? 30 : landscape ? 38 : 36) : compact ? 36 : landscape ? 46 : 44;
 
   const toggle = (d: number) => {
     if (single) {
@@ -49,18 +52,24 @@ export function NumberPicker({
   };
 
   const body = (
-    <View style={[styles.grid, { gap: space.xs }]}>
+    <View style={[styles.grid, { gap: compact ? 3 : space.xs }]}>
       {digits.map((d) => (
         <Chip
           key={d}
           label={String(d).padStart(isLarge ? 2 : 1, '0')}
           active={value.includes(d)}
           onPress={() => toggle(d)}
-          style={{ width: size, height: size }}
+          compact={compact}
+          style={{ width: size, height: size, borderRadius: compact ? 6 : 999 }}
         />
       ))}
     </View>
   );
+
+  if (compact) {
+    // 横屏：只渲染号码网格本身，不占额外纵向空间
+    return <View style={styles.wrap}>{body}</View>;
+  }
 
   return (
     <View style={styles.wrap}>

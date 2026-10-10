@@ -10,7 +10,7 @@
  * 图表内部再按容器宽度自适应，保证走势形态不被拉伸。
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Screen } from '../../components/Screen';
 import { GameSwitch } from '../../components/GameSwitch';
 import { NumberPicker } from '../../components/NumberPicker';
@@ -86,8 +86,19 @@ const BACK_OPTIONS = ['0', '1', '2', '3', '5'];
 const STEP_OPTIONS = ['5', '10', '20', '50'];
 
 export default function ChartScreen() {
-  const { landscape, chartH, chartW, contentW } = useResponsive();
+  const {
+    landscape,
+    chartH,
+    chartW,
+    contentW,
+    availH,
+    railW,
+    railCollapsed,
+    panelW: chartPanelW,
+  } = useResponsive();
 
+  /** 横屏控制栏是否展开（默认收起，进横屏第一眼就是整屏图表） */
+  const [railOpen, setRailOpen] = useState(false);
   const [gameId, setGameId] = useState<GameId>('fc3d');
   const game = useMemo(() => getGame(gameId), [gameId]);
 
@@ -274,54 +285,216 @@ export default function ChartScreen() {
     return { cur, max, freq, avg, rep };
   }, [hits, records.length]);
 
-  const chartWidth = landscape ? chartW : contentW - 24;
-
   /** 退期生效的模式 */
   const showBack = mode === 'cycle' || mode === 'omitK' || mode === 'count';
   /** 需要遗漏范围参数的模式 */
   const showRange = mode === 'omitK' || mode === 'second';
 
-  return (
-    <Screen>
-      <GameSwitch value={gameId} onChange={setGameId} />
+  /** 图表区宽度：横屏取图表区可用宽度，竖屏取内容宽度 */
+  const chartWidth = landscape ? chartPanelW : contentW;
+  /** 图表高度：横屏/竖屏都用响应式给出的高度（横屏已按窗口高度收敛） */
+  const chartHeight = chartH;
+  /** 横屏时控件一律走紧凑模式，避免胶囊按钮在窄栏里换行把图表挤出屏幕 */
+  const compact = landscape;
 
+  /* ==================== 图表区（横屏放右侧 / 竖屏放面板下方） ==================== */
+  const chartBody = loading ? (
+    <Panel compact={compact}>
+      <Loading text="正在获取历史开奖数据…" />
+    </Panel>
+  ) : error ? (
+    <Panel compact={compact}>
+      <Empty text={error} />
+    </Panel>
+  ) : !records.length ? (
+    <Panel compact={compact}>
+      <Empty text="暂无数据，请点击刷新" />
+    </Panel>
+  ) : (
+    <View style={[styles.chartArea, landscape && styles.chartAreaLandscape]}>
+      {/* 趋势判断（官方：实际出次 vs 理论出次） */}
+      {trend ? (
+        <>
+          <Panel bodyStyle={{ paddingVertical: space.xs, paddingHorizontal: space.sm }} compact={compact}>
+            <Row justify="space-between">
+              <Text
+                style={[
+                  styles.trendText,
+                  compact && styles.trendTextCompact,
+                  {
+                    color:
+                      trend.direction === 'up'
+                        ? semantic.hot
+                        : trend.direction === 'down'
+                          ? semantic.cold
+                          : semantic.textDim,
+                  },
+                ]}
+              >
+                {trend.label}
+              </Text>
+              <Text style={styles.trendMeta} numberOfLines={1}>
+                实际 {trend.actual} / 理论 {trend.expected.toFixed(1)}
+                （{(trend.deviation * 100).toFixed(0)}%）· 当前遗漏 {currentOmission(hits)}
+              </Text>
+            </Row>
+          </Panel>
+          <Spacer size={space.sm} />
+        </>
+      ) : null}
+
+      {/* 遗漏图：节点 + MA5/10/25 */}
+      {mode === 'omit' || mode === 'second' ? (
+        <View style={[styles.chartBox, landscape ? styles.chartBoxLandscape : { width: chartWidth }]}>
+          <Panel
+            title={mode === 'omit' ? omitTitle : `二阶遗漏（范围 ${rangeMin}~${rangeMax}）`}
+            bodyStyle={{ padding: space.xs }}
+          >
+            <OmissionChart
+              nodes={mode === 'omit' ? nodes : secondNodes}
+              height={chartHeight}
+              landscape={landscape}
+            />
+          </Panel>
+        </View>
+      ) : null}
+
+      {/* 出次图 */}
+      {mode === 'count' ? (
+        <View style={[styles.chartBox, landscape ? styles.chartBoxLandscape : { width: chartWidth }]}>
+          <Panel title={`出次图（步长 ${step} · 退期 ${back}）`} bodyStyle={{ padding: space.xs }}>
+            <CountChart
+              points={buildCountChart(hits, records, step, back)}
+              height={chartHeight}
+              landscape={landscape}
+            />
+          </Panel>
+        </View>
+      ) : null}
+
+      {/* 开出遗漏 */}
+      {mode === 'drawOmit' ? (
+        <View style={[styles.chartBox, landscape ? styles.chartBoxLandscape : { width: chartWidth }]}>
+          <Panel title="开出遗漏（当期各位置）" bodyStyle={{ padding: space.xs }}>
+            <CountChart
+              points={drawOmissionSeriesToPoints(records, drawOmit?.series ?? [])}
+              height={chartHeight}
+              landscape={landscape}
+            />
+          </Panel>
+        </View>
+      ) : null}
+
+      {/* 蜡烛图（频率 / 周期 / 遗漏K线） */}
+      {candleSeries && (mode === 'freq' || mode === 'cycle' || mode === 'omitK') ? (
+        <View style={[styles.chartBox, landscape ? styles.chartBoxLandscape : { width: chartWidth }]}>
+          <Panel
+            title={`${MODE_OPTIONS.find((m) => m.value === mode)?.label}${
+              mode === 'freq' ? '' : `（周期 ${period} · ${align === 'left' ? '左对齐' : '右对齐'}）`
+            }`}
+            bodyStyle={{ padding: space.xs }}
+          >
+            <KLineChart
+              series={candleSeries}
+              overlays={overlays}
+              candleColors={omitColors}
+              height={chartHeight}
+              landscape={landscape}
+            />
+          </Panel>
+        </View>
+      ) : null}
+
+      {/* 指标副图：非叠加型指标单独一张 */}
+      {indicatorSeries && !indicatorSeries.def.overlay && candleSeries ? (
+        <View style={[styles.chartBox, landscape ? styles.chartBoxLandscape : { width: chartWidth }]}>
+          <Panel title={indicatorSeries.def.name} bodyStyle={{ padding: space.xs }}>
+            <IndicatorChart
+              categories={candleSeries.categories}
+              series={indicatorSeries.series}
+              height={chartHeight}
+              landscape={landscape}
+            />
+          </Panel>
+        </View>
+      ) : null}
+
+      {/* 指标副图：叠加型指标再画一张带指标的 K 线 */}
+      {indicatorSeries?.def.overlay && candleSeries ? (
+        <View style={[styles.chartBox, landscape ? styles.chartBoxLandscape : { width: chartWidth }]}>
+          <Panel title={`${indicatorSeries.def.name}（叠加主图）`} bodyStyle={{ padding: space.xs }}>
+            <KLineChart
+              series={candleSeries}
+              overlays={[
+                ...overlays,
+                ...indicatorSeries.series.map((s, i) => ({
+                  name: s.name,
+                  data: s.data,
+                  color: s.color ?? MA_COLORS[i % MA_COLORS.length],
+                })),
+              ]}
+              height={chartHeight}
+              landscape={landscape}
+            />
+          </Panel>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  /* ==================== 控制面板（横屏放左侧栏 / 竖屏放图表上方） ==================== */
+  const controls = (
+    <>
       {/* ---------- 分析对象 ---------- */}
-      <Panel title="分析对象">
-        <Text style={styles.label}>位置</Text>
-        <Segmented options={posOptions} value={pos} onChange={(v) => setPos(v as PosKey)} />
-        <Spacer size={space.md} />
-        <Text style={styles.label}>{game.style === 'keno' ? '号码' : '数字'}</Text>
-        <NumberPicker
-          game={game}
-          value={[digit]}
-          single
-          landscape={landscape}
-          onChange={(next) => setDigit(next[0] ?? game.digitMin)}
-        />
+      <Panel title="分析对象" compact={compact}>
+        <Field label="位置" compact={compact}>
+          <Segmented
+            options={posOptions}
+            value={pos}
+            onChange={(v) => setPos(v as PosKey)}
+            compact={compact}
+          />
+        </Field>
+        <Field label={game.style === 'keno' ? '号码' : '数字'} compact={compact}>
+          <NumberPicker
+            game={game}
+            value={[digit]}
+            single
+            landscape={landscape}
+            compact={compact}
+            onChange={(next) => setDigit(next[0] ?? game.digitMin)}
+          />
+        </Field>
       </Panel>
 
       <Spacer size={space.md} />
 
       {/* ---------- 模式与参数 ---------- */}
-      <Panel title="K 线模式">
-        <Segmented options={MODE_OPTIONS} value={mode} onChange={(v) => setMode(v as Mode)} />
-        <Spacer size={space.md} />
-        <Divider />
+      <Panel title="K 线模式" compact={compact}>
+        <Segmented
+          options={MODE_OPTIONS}
+          value={mode}
+          onChange={(v) => setMode(v as Mode)}
+          compact={compact}
+        />
         <Spacer size={space.sm} />
+        <Divider />
+        <Spacer size={space.xs} />
 
         {mode === 'cycle' || mode === 'omitK' ? (
-          <Field label="周期">
+          <Field label="周期" compact={compact}>
             <Segmented
               options={PERIOD_OPTIONS.map((v) => ({ value: v, label: v }))}
               value={String(period)}
               onChange={(v) => setPeriod(Number(v))}
+              compact={compact}
             />
           </Field>
         ) : null}
 
         {showRange ? (
           <>
-            <Field label="遗漏范围设定">
+            <Field label="遗漏范围设定" compact={compact}>
               <Segmented
                 options={[
                   { value: 'theory' as OmissionRangeMode, label: '理论周期' },
@@ -331,21 +504,23 @@ export default function ChartScreen() {
                 ]}
                 value={rangeMode}
                 onChange={(v) => setRangeMode(v as OmissionRangeMode)}
+                compact={compact}
               />
             </Field>
 
             {rangeMode === 'plan' ? (
-              <Field label={`计划期数：${planPeriods} 期`}>
+              <Field label={`计划期数：${planPeriods} 期`} compact={compact}>
                 <Segmented
                   options={[1, 2, 3, 4, 5, 6].map((v) => ({ value: String(v), label: String(v) }))}
                   value={String(planPeriods)}
                   onChange={(v) => setPlanPeriods(Number(v))}
+                  compact={compact}
                 />
               </Field>
             ) : null}
 
             {rangeMode === 'custom' ? (
-              <Field label="自定义范围">
+              <Field label="自定义范围" compact={compact}>
                 <Row gap={space.xs}>
                   <Input value={rangeMin} onChangeText={setRangeMin} keyboardType="numeric" placeholder="最小" />
                   <Text style={styles.dash}>—</Text>
@@ -354,7 +529,7 @@ export default function ChartScreen() {
               </Field>
             ) : null}
 
-            <Field label="实际生效范围">
+            <Field label="实际生效范围" compact={compact}>
               <Text style={styles.rangeHint}>
                 {range[0]} ~ {range[1]}
                 {rangeMode === 'theory'
@@ -370,232 +545,195 @@ export default function ChartScreen() {
         ) : null}
 
         {mode === 'count' ? (
-          <Field label="统计步长">
+          <Field label="统计步长" compact={compact}>
             <Segmented
               options={STEP_OPTIONS.map((v) => ({ value: v, label: v }))}
               value={String(step)}
               onChange={(v) => setStep(Number(v))}
+              compact={compact}
             />
           </Field>
         ) : null}
 
         {showBack ? (
-          <Field label="退期">
+          <Field label="退期" compact={compact}>
             <Segmented
               options={BACK_OPTIONS.map((v) => ({ value: v, label: v }))}
               value={String(back)}
               onChange={(v) => setBack(Number(v))}
+              compact={compact}
             />
           </Field>
         ) : null}
 
         {mode === 'omit' || mode === 'second' ? (
-          <Field label="均线延长到当前遗漏">
-            <Chip label={extendMA ? '已开启' : '已关闭'} active={extendMA} onPress={() => setExtendMA((v) => !v)} />
+          <Field label="均线延长到当前遗漏" compact={compact}>
+            <Chip
+              label={extendMA ? '已开启' : '已关闭'}
+              active={extendMA}
+              onPress={() => setExtendMA((v) => !v)}
+              compact={compact}
+            />
           </Field>
         ) : null}
 
         {mode === 'freq' || mode === 'cycle' || mode === 'omitK' ? (
-          <Field label="主图均线">
-            <Chip label={showMA ? '已开启' : '已关闭'} active={showMA} onPress={() => setShowMA((v) => !v)} />
+          <Field label="主图均线" compact={compact}>
+            <Chip
+              label={showMA ? '已开启' : '已关闭'}
+              active={showMA}
+              onPress={() => setShowMA((v) => !v)}
+              compact={compact}
+            />
           </Field>
         ) : null}
       </Panel>
 
-      <Spacer size={space.md} />
-
-      {/* ---------- 图表区 ---------- */}
-      {loading ? (
-        <Panel>
-          <Loading text="正在获取历史开奖数据…" />
-        </Panel>
-      ) : error ? (
-        <Panel>
-          <Empty text={error} />
-        </Panel>
-      ) : !records.length ? (
-        <Panel>
-          <Empty text="暂无数据，请点击刷新" />
-        </Panel>
-      ) : (
-        <View style={[styles.chartArea, landscape && styles.chartAreaLandscape]}>
-          {/* 趋势判断（官方：实际出次 vs 理论出次） */}
-          {trend ? (
-            <>
-              <Panel bodyStyle={{ paddingVertical: space.sm }}>
-                <Row>
-                  <Text
-                    style={[
-                      styles.trendText,
-                      { color: trend.direction === 'up' ? semantic.hot : trend.direction === 'down' ? semantic.cold : semantic.textDim },
-                    ]}
-                  >
-                    {trend.label}
-                  </Text>
-                </Row>
-                <Spacer size={space.xs} />
-                <Text style={styles.trendMeta}>
-                  近段实际出次 {trend.actual} / 理论出次 {trend.expected.toFixed(1)}
-                  （偏离 {(trend.deviation * 100).toFixed(0)}%）
-                  · 理论遗漏 {(cycle - 1).toFixed(2)} · 当前遗漏 {currentOmission(hits)}
-                </Text>
-              </Panel>
-              <Spacer size={space.md} />
-            </>
-          ) : null}
-
-          {/* 遗漏图：节点 + MA5/10/25 */}
-          {mode === 'omit' || mode === 'second' ? (
-            <View style={[styles.chartBox, { width: chartWidth }]}>
-              <Panel
-                title={mode === 'omit' ? omitTitle : `二阶遗漏（范围 ${rangeMin}~${rangeMax}）`}
-                bodyStyle={{ padding: space.xs }}
-              >
-                <OmissionChart
-                  nodes={mode === 'omit' ? nodes : secondNodes}
-                  height={chartH}
-                  landscape={landscape}
+      {/* 横屏在侧栏里也要能换指标，避免为了换指标把屏幕转回竖屏 */}
+      {landscape ? (
+        <>
+          <Spacer size={space.md} />
+          <Panel title="技术指标" compact>
+            <Row gap={space.xs}>
+              {[
+                { value: 'none', label: '无' },
+                ...INDICATOR_KEYS.map((id) => ({ value: id, label: getIndicator(id)?.name ?? id })),
+              ].map((opt) => (
+                <Chip
+                  key={opt.value}
+                  label={opt.label}
+                  active={indicatorId === opt.value}
+                  onPress={() => setIndicatorId(opt.value)}
+                  compact
                 />
-              </Panel>
-            </View>
+              ))}
+            </Row>
+          </Panel>
+        </>
+      ) : null}
+    </>
+  );
+
+  return (
+    <Screen
+      scroll={!landscape}
+      padding={landscape ? space.sm : space.lg}
+      contentStyle={landscape ? styles.screenLandscape : undefined}
+    >
+      <GameSwitch value={gameId} onChange={setGameId} compact={compact} />
+
+      <Spacer size={space.sm} />
+
+      {landscape ? (
+        /* ================= 横屏：左控制栏 + 右图表区 =================
+           横屏纵向空间极紧，这里必须给出确定高度：
+           外层 Screen 关闭滚动，控制栏与图表区各自独立滚动，
+           否则 ScrollView 内的 flex:1 会塌陷，图表被挤出屏幕。 */
+        <View style={[styles.landscapeRoot, { height: availH }]}>
+          {/* 折叠条：默认收起，点一下展开控制栏 */}
+          <Pressable
+            onPress={() => setRailOpen((v) => !v)}
+            style={[
+              styles.railBar,
+              { width: railCollapsed, height: availH - space.sm },
+            ]}
+          >
+            <Text style={styles.railBarText}>参{'\n'}数</Text>
+            <Text style={styles.railBarArrow}>{railOpen ? '‹' : '›'}</Text>
+          </Pressable>
+
+          {railOpen ? (
+            <ScrollView
+              style={[styles.rail, { width: railW, height: availH - space.sm }]}
+              contentContainerStyle={{ paddingBottom: space.lg }}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+            >
+              {controls}
+            </ScrollView>
           ) : null}
 
-          {/* 出次图 */}
-          {mode === 'count' ? (
-            <View style={[styles.chartBox, { width: chartWidth }]}>
-              <Panel title={`出次图（步长 ${step} · 退期 ${back}）`} bodyStyle={{ padding: space.xs }}>
-                <CountChart
-                  points={buildCountChart(hits, records, step, back)}
-                  height={chartH}
-                  landscape={landscape}
-                />
-              </Panel>
-            </View>
-          ) : null}
-
-          {/* 开出遗漏 */}
-          {mode === 'drawOmit' ? (
-            <View style={[styles.chartBox, { width: chartWidth }]}>
-              <Panel title="开出遗漏（当期各位置）" bodyStyle={{ padding: space.xs }}>
-                <CountChart
-                  points={drawOmissionSeriesToPoints(records, drawOmit?.series ?? [])}
-                  height={chartH}
-                  landscape={landscape}
-                />
-              </Panel>
-            </View>
-          ) : null}
-
-          {/* 蜡烛图（频率 / 周期 / 遗漏K线） */}
-          {candleSeries && (mode === 'freq' || mode === 'cycle' || mode === 'omitK') ? (
-            <View style={[styles.chartBox, { width: chartWidth }]}>
-              <Panel
-                title={`${MODE_OPTIONS.find((m) => m.value === mode)?.label}${
-                  mode === 'freq' ? '' : `（周期 ${period} · ${align === 'left' ? '左对齐' : '右对齐'}）`
-                }`}
-                bodyStyle={{ padding: space.xs }}
-              >
-                <KLineChart
-                  series={candleSeries}
-                  overlays={overlays}
-                  candleColors={omitColors}
-                  height={chartH}
-                  landscape={landscape}
-                />
-              </Panel>
-            </View>
-          ) : null}
-
-          {/* 指标副图：非叠加型指标单独一张 */}
-          {indicatorSeries && !indicatorSeries.def.overlay && candleSeries ? (
-            <View style={[styles.chartBox, { width: chartWidth }]}>
-              <Panel title={indicatorSeries.def.name} bodyStyle={{ padding: space.xs }}>
-                <IndicatorChart
-                  categories={candleSeries.categories}
-                  series={indicatorSeries.series}
-                  height={chartH}
-                  landscape={landscape}
-                />
-              </Panel>
-            </View>
-          ) : null}
-
-          {/* 指标副图：叠加型指标再画一张带指标的 K 线 */}
-          {indicatorSeries?.def.overlay && candleSeries ? (
-            <View style={[styles.chartBox, { width: chartWidth }]}>
-              <Panel title={`${indicatorSeries.def.name}（叠加主图）`} bodyStyle={{ padding: space.xs }}>
-                <KLineChart
-                  series={candleSeries}
-                  overlays={[
-                    ...overlays,
-                    ...indicatorSeries.series.map((s, i) => ({
-                      name: s.name,
-                      data: s.data,
-                      color: s.color ?? MA_COLORS[i % MA_COLORS.length],
-                    })),
-                  ]}
-                  height={chartH}
-                  landscape={landscape}
-                />
-              </Panel>
-            </View>
-          ) : null}
+          {/* 图表区：只在这里滚动，控制栏不跟着动 */}
+          <ScrollView
+            style={styles.chartPane}
+            contentContainerStyle={{ paddingBottom: space.sm }}
+            showsVerticalScrollIndicator
+          >
+            {chartBody}
+          </ScrollView>
         </View>
+      ) : (
+        /* ================= 竖屏：面板在上，图表在下 ================= */
+        <>
+          {controls}
+
+          <Spacer size={space.md} />
+
+          {chartBody}
+        </>
       )}
 
-      <Spacer size={space.md} />
+      {landscape ? null : (
+        <>
+          <Spacer size={space.md} />
 
-      {/* ---------- 指标选择 ---------- */}
-      <Panel title="技术指标">
-        <Row>
-          {[
-            { value: 'none', label: '无' },
-            ...INDICATOR_KEYS.map((id) => ({ value: id, label: getIndicator(id)?.name ?? id })),
-          ].map((opt) => (
-            <Chip
-              key={opt.value}
-              label={opt.label}
-              active={indicatorId === opt.value}
-              onPress={() => setIndicatorId(opt.value)}
-            />
-          ))}
-        </Row>
-        {indicatorId !== 'none' ? (
-          <Text style={styles.tip}>
-            指标参数取默认值，可在「设置 → 指标参数」中调整（当前版本使用默认参数）。
-          </Text>
-        ) : null}
-      </Panel>
-
-      <Spacer size={space.md} />
-
-      {/* ---------- 统计摘要 ---------- */}
-      {stats ? (
-        <Panel title="统计摘要">
-          <Row>
-            <Stat label="当前遗漏" value={stats.cur} color={stats.cur > stats.avg * 2 ? semantic.hot : semantic.text} />
-            <Stat label="最大遗漏" value={stats.max} />
-            <Stat label="出现次数" value={stats.freq} />
-            <Stat label="平均遗漏" value={stats.avg.toFixed(1)} />
-            <Stat
-              label="欲出几率"
-              value={stats.avg > 0 ? (stats.cur / stats.avg).toFixed(2) : '0.00'}
-              color={stats.avg > 0 && stats.cur / stats.avg > 2 ? semantic.hot : semantic.text}
-            />
-            <Stat label="当前连出" value={stats.rep.current} />
-          </Row>
-          {turning.length ? (
-            <>
-              <Spacer size={space.sm} />
+          {/* ---------- 技术指标 ---------- */}
+          <Panel title="技术指标">
+            <Row>
+              {[
+                { value: 'none', label: '无' },
+                ...INDICATOR_KEYS.map((id) => ({ value: id, label: getIndicator(id)?.name ?? id })),
+              ].map((opt) => (
+                <Chip
+                  key={opt.value}
+                  label={opt.label}
+                  active={indicatorId === opt.value}
+                  onPress={() => setIndicatorId(opt.value)}
+                />
+              ))}
+            </Row>
+            {indicatorId !== 'none' ? (
               <Text style={styles.tip}>
-                近期均线拐点：{turning.map((t) => `MA${t.period}→${t.value.toFixed(1)}`).join(' · ')}
+                指标参数取默认值，可在「设置 → 指标参数」中调整（当前版本使用默认参数）。
               </Text>
-            </>
-          ) : null}
-        </Panel>
-      ) : null}
+            ) : null}
+          </Panel>
+        </>
+      )}
 
-      <Spacer size={space.xl} />
+      {landscape ? null : (
+        <>
+          <Spacer size={space.md} />
+
+          {/* ---------- 统计摘要 ---------- */}
+          {stats ? (
+            <Panel title="统计摘要">
+              <Row>
+                <Stat label="当前遗漏" value={stats.cur} color={stats.cur > stats.avg * 2 ? semantic.hot : semantic.text} />
+                <Stat label="最大遗漏" value={stats.max} />
+                <Stat label="出现次数" value={stats.freq} />
+                <Stat label="平均遗漏" value={stats.avg.toFixed(1)} />
+                <Stat
+                  label="欲出几率"
+                  value={stats.avg > 0 ? (stats.cur / stats.avg).toFixed(2) : '0.00'}
+                  color={stats.avg > 0 && stats.cur / stats.avg > 2 ? semantic.hot : semantic.text}
+                />
+                <Stat label="当前连出" value={stats.rep.current} />
+              </Row>
+              {turning.length ? (
+                <>
+                  <Spacer size={space.sm} />
+                  <Text style={styles.tip}>
+                    近期均线拐点：{turning.map((t) => `MA${t.period}→${t.value.toFixed(1)}`).join(' · ')}
+                  </Text>
+                </>
+              ) : null}
+            </Panel>
+          ) : null}
+        </>
+      )}
+
+      <Spacer size={landscape ? space.sm : space.xl} />
 
       <Row>
         <Text style={styles.meta}>
@@ -603,10 +741,10 @@ export default function ChartScreen() {
           {source === 'network' ? '17500.cn' : source === 'cache' ? '本地缓存' : source === 'seed' ? '内置种子' : '—'}
           {refreshedAt ? ` · 更新于 ${new Date(refreshedAt).toLocaleString('zh-CN')}` : ''}
         </Text>
-        <Chip label="强制刷新" onPress={() => refresh(true)} />
+        <Chip label="强制刷新" onPress={() => refresh(true)} compact={compact} />
       </Row>
 
-      <Spacer size={space.xxl} />
+      <Spacer size={landscape ? space.md : space.xxl} />
     </Screen>
   );
 }
@@ -641,6 +779,61 @@ const INDICATOR_KEYS = [
 ];
 
 const styles = StyleSheet.create({
+  /** 横屏：整屏不再纵向滚动，改为左右分栏 */
+  screenLandscape: {
+    paddingHorizontal: space.sm,
+    paddingTop: space.sm,
+  },
+  landscapeRoot: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: space.sm,
+  },
+  /** 折叠状态的竖向细条：点一下展开控制栏 */
+  railBar: {
+    width: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.md,
+    paddingVertical: space.md,
+  },
+  railBarText: {
+    color: semantic.brand,
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    // 竖排文字：把「参数」两字竖着叠起来
+    width: 12,
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+  railBarArrow: {
+    color: semantic.textFaint,
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+  },
+  /** 展开后的控制栏：内部可滚动，不挤压右侧图表 */
+  rail: {
+    flexShrink: 0,
+    backgroundColor: semantic.contentBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.md,
+    paddingHorizontal: space.sm,
+    paddingTop: space.sm,
+  },
+  /** 右侧图表区：占满剩余宽度，内部独立滚动 */
+  chartPane: {
+    flex: 1,
+    minWidth: 0,
+  },
+  /** 横屏：图表容器宽度撑满，让 ECharts 按容器实测宽度绘制 */
+  chartBoxLandscape: {
+    width: '100%',
+  },
   label: {
     color: semantic.textDim,
     fontSize: fontSize.sm,
@@ -653,6 +846,7 @@ const styles = StyleSheet.create({
   },
   chartAreaLandscape: {
     alignItems: 'flex-start',
+    gap: space.sm,
   },
   chartBox: {
     flexGrow: 0,
@@ -681,9 +875,13 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: '700',
   },
+  trendTextCompact: {
+    fontSize: fontSize.sm,
+  },
   trendMeta: {
     color: semantic.textFaint,
     fontSize: fontSize.xs,
     lineHeight: 16,
+    flexShrink: 1,
   },
 });
