@@ -24,6 +24,7 @@ import { EChartsOmissionChart } from '@/components/charts/EChartsOmissionChart';
 import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart';
 import { EChartsChuciChart } from '@/components/charts/EChartsChuciChart';
 import { EChartsMissSumChart } from '@/components/charts/EChartsMissSumChart';
+import { EChartsKl8Heatmap, type Kl8HeatMode } from '@/components/charts/EChartsKl8Heatmap';
 // 注：原 Skia 版原始值走势图已改用 EChartsRawChart（WebView 渲染），
 // 以保证 App 可在 Expo Go（Termux 热更新）运行，不依赖自定义原生模块。
 import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
@@ -77,7 +78,8 @@ type ChartMode =
   | 'omissionLine2'
   | 'chuci'        // 出次图（分段出次）
   | 'chuciMove'    // 出次移动统计
-  | 'missSum';     // 遗漏和
+  | 'missSum'      // 遗漏和
+  | 'kl8dist';     // 快乐8 分布图形（仅 kl8）
 type TabId =
   | 'common' | 'dan' | 'dantuo' | 'pos' | 'multi'
   | 'heji' | 'amp' | 'random1' | 'random2' | 'group'
@@ -109,6 +111,7 @@ const CHART_MODES: { id: ChartMode; label: string }[] = [
   { id: 'chuci', label: '出次图' },
   { id: 'chuciMove', label: '出次移动' },
   { id: 'missSum', label: '遗漏和' },
+  { id: 'kl8dist', label: '分布' },
 ];
 
 const POS_OPTIONS: Position[] = ['any', 'bai', 'shi', 'ge'];
@@ -415,6 +418,8 @@ export default function AnalyzeScreen() {
   const [drawBack, setDrawBack] = useState(0);
   /** 遗漏和口径：直选(定位胆) / 组选(不定位胆) / 全胆 */
   const [missSumKind, setMissSumKind] = useState<'direct' | 'group' | 'all'>('direct');
+  /** 分布图形口径：freq=近N期出现次数 / omission=当前遗漏 */
+  const [kl8HeatMode, setKl8HeatMode] = useState<Kl8HeatMode>('freq');
   const [chartModes, setChartModes] = useState<ChartMode[]>(['freq']);
   const [compareTargets, setCompareTargets] = useState<Target[] | null>(null);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
@@ -737,6 +742,7 @@ export default function AnalyzeScreen() {
       chuci: { title: '出次图', meta: `分段${stepPeriod}期出次` },
       chuciMove: { title: '出次移动统计', meta: '统计期内出次渐变' },
       missSum: { title: '遗漏和', meta: '各元素遗漏值之和' },
+      kl8dist: { title: '分布图形', meta: '80号热力 · 冷热/遗漏' },
     };
     return m;
   }, [period, stepPeriod]);
@@ -771,6 +777,21 @@ export default function AnalyzeScreen() {
     () => series.map((p) => ({ issue: p.issue, omission: p.omission })),
     [series],
   );
+
+  /** 快乐8 分布图形数据：80 号的出现次数与当前遗漏（近全部已加载期） */
+  const kl8Heat = useMemo(() => {
+    if (gameId !== 'kl8' || records.length === 0) return null;
+    const N = records.length;
+    const counts = new Array<number>(80).fill(0);
+    const lastHit = new Array<number>(80).fill(-1);
+    records.forEach((r, i) => {
+      for (const d of (r.nums ?? []) as number[]) {
+        if (d >= 1 && d <= 80) { counts[d - 1] += 1; lastHit[d - 1] = i; }
+      }
+    });
+    const omissions = counts.map((_, i) => (lastHit[i] < 0 ? N : N - 1 - lastHit[i]));
+    return { counts, omissions, lastN: N };
+  }, [gameId, records]);
 
   /** 当前遗漏（原型 .status-pill 用） */
   const currentOmission = omissionSeries.length > 0
@@ -2015,6 +2036,21 @@ export default function AnalyzeScreen() {
     label: string,
     historyMax?: number,
   ) => {
+    // 快乐8 分布图形：80 号热力图（与目标序列无关，走游戏级数据）
+    if (m === 'kl8dist') {
+      if (!kl8Heat) return null;
+      return (
+        <EChartsKl8Heatmap
+          counts={kl8Heat.counts}
+          omissions={kl8Heat.omissions}
+          mode={kl8HeatMode}
+          lastN={kl8Heat.lastN}
+          height={h}
+          width={w}
+          targetLabel={`${chartMeta[m].title}`}
+        />
+      );
+    }
     // 出次图 / 出次移动统计 / 遗漏和 —— 官方遗漏分析家族，走各自的折线组件
     if (m === 'chuci' || m === 'chuciMove') {
       const issues = s.map((p) => p.issue);
@@ -2407,6 +2443,23 @@ export default function AnalyzeScreen() {
               >
                 <Text style={[styles.barChipText, compareTargets && styles.barChipTextOn]}>同屏</Text>
               </Pressable>
+              {gameId === 'kl8' && (
+                <Pressable
+                  style={[styles.barChip, chartModes.includes('kl8dist') && styles.barChipOn]}
+                  onPress={() => {
+                    if (chartModes.includes('kl8dist')) {
+                      setKl8HeatMode((v) => (v === 'freq' ? 'omission' : 'freq'));
+                    } else {
+                      setChartModes(['kl8dist']);
+                    }
+                  }}
+                  accessibilityState={{ selected: chartModes.includes('kl8dist') }}
+                >
+                  <Text style={[styles.barChipText, chartModes.includes('kl8dist') && styles.barChipTextOn]}>
+                    分布{chartModes.includes('kl8dist') ? (kl8HeatMode === 'freq' ? '·热' : '·遗') : ''}
+                  </Text>
+                </Pressable>
+              )}
               <Pressable style={styles.barChip} onPress={() => setMoreMenuOpen(true)}>
                 <Text style={styles.barChipText}>•••</Text>
               </Pressable>
@@ -2504,7 +2557,7 @@ export default function AnalyzeScreen() {
           <View style={[styles.modalCard, { minWidth: 240 }]}>
             <Text style={styles.modalTitle}>更多</Text>
             <View style={styles.chipRow}>
-              {CHART_MODES.filter((c) => !['freq', 'omissionLine', 'omissionK', 'chuci'].includes(c.id)).map((c) => (
+              {CHART_MODES.filter((c) => !['freq', 'omissionLine', 'omissionK', 'chuci'].includes(c.id) && (gameId === 'kl8' || c.id !== 'kl8dist')).map((c) => (
                 <Chip
                   key={c.id}
                   label={c.label}
