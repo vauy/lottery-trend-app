@@ -36,7 +36,7 @@ import {
   type IndicatorId,
   type MaConfig,
 } from '@/lib/charts/indicators';
-import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
+import { buildRawSeries, buildShapeCodes, getTargetLabel, posIndex, SET_ATTRS, type SetAttrKey, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
 import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
@@ -171,18 +171,64 @@ function pairGroup(d: number): number[] {
   return PAIR_GROUPS.find((g) => g.includes(d)) ?? [d];
 }
 
-// 三个两码和尾
-function twoSums(nums: number[]): number[] {
-  return [(nums[0] + nums[1]) % 10, (nums[0] + nums[2]) % 10, (nums[1] + nums[2]) % 10];
+// 全部两码组合（C(D,2)），适配任意位数：排列三=D3 得 3 组，排列五=D5 得 10 组
+function allPairSums(nums: number[]): Set<number> {
+  const s = new Set<number>();
+  for (let i = 0; i < nums.length; i += 1)
+    for (let j = i + 1; j < nums.length; j += 1) s.add((nums[i] + nums[j]) % 10);
+  return s;
 }
 
-// 三个两码差
-function twoDiffs(nums: number[]): number[] {
-  return [
-    Math.abs(nums[0] - nums[1]),
-    Math.abs(nums[0] - nums[2]),
-    Math.abs(nums[1] - nums[2]),
-  ];
+// 全部两码差（绝对值）
+function allPairDiffs(nums: number[]): Set<number> {
+  const s = new Set<number>();
+  for (let i = 0; i < nums.length; i += 1)
+    for (let j = i + 1; j < nums.length; j += 1) s.add(Math.abs(nums[i] - nums[j]));
+  return s;
+}
+
+/** 两个数字集合是否有交集 */
+function setIntersects(a: Set<number>, b: Set<number>): boolean {
+  for (const x of a) if (b.has(x)) return true;
+  return false;
+}
+
+/** 递归枚举所有 D 位号码（每位 0-9），对命中的调用 cb（通用位数，支撑排列五五位） */
+function eachNumber(D: number, cb: (nums: number[]) => void): void {
+  const cur = new Array<number>(D).fill(0);
+  const rec = (i: number): void => {
+    if (i === D) {
+      cb(cur);
+      return;
+    }
+    for (let d = 0; d <= 9; d += 1) {
+      cur[i] = d;
+      rec(i + 1);
+    }
+  };
+  rec(0);
+}
+
+/** 确定性随机：相同 seed 产出相同序列，避免每次渲染抖动 */
+function seededRng(seed: number): () => number {
+  let s = (seed + 1) >>> 0;
+  return () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+/** 组内随机：每位从允许池里随机取一个，组成 D 位号码，生成 count 注 */
+function genRandomCodes(D: number, pool: number[], count: number, seed: number): string[] {
+  const digits = pool.length > 0 ? pool : DIGITS;
+  const rnd = seededRng(seed);
+  const out: string[] = [];
+  for (let k = 0; k < count; k += 1) {
+    let code = '';
+    for (let i = 0; i < D; i += 1) code += String(digits[Math.floor(rnd() * digits.length)]);
+    out.push(code);
+  }
+  return out;
 }
 
 // 按类型判断单个号码是否命中
@@ -229,34 +275,34 @@ function matchFilter(type: string, nums: number[], dan: number[], pei: number[])
     }
     case 'sum': {
       // 两码合：号码两码和尾 与 胆码两两和尾 有交集
-      const s = twoSums(nums);
+      const s = allPairSums(nums);
       const danTargets = sumSet(dan);
-      if (!s.some((x) => danTargets.has(x))) return false;
+      if (!setIntersects(s, danTargets)) return false;
       if (pei.length > 0) {
         const peiTargets = sumSet(pei);
-        if (!s.some((x) => peiTargets.has(x))) return false;
+        if (!setIntersects(s, peiTargets)) return false;
       }
       return true;
     }
     case 'diff': {
       // 两码差：号码两码差 与 胆码本身（或胆码两两差）有交集
-      const s = twoDiffs(nums);
+      const s = allPairDiffs(nums);
       const danTargets = diffSet(dan);
-      if (!s.some((x) => danTargets.has(x))) return false;
+      if (!setIntersects(s, danTargets)) return false;
       if (pei.length > 0) {
         const peiTargets = diffSet(pei);
-        if (!s.some((x) => peiTargets.has(x))) return false;
+        if (!setIntersects(s, peiTargets)) return false;
       }
       return true;
     }
     case 'span': {
       // 两码跨：同两码差
-      const s = twoDiffs(nums);
+      const s = allPairDiffs(nums);
       const danTargets = diffSet(dan);
-      if (!s.some((x) => danTargets.has(x))) return false;
+      if (!setIntersects(s, danTargets)) return false;
       if (pei.length > 0) {
         const peiTargets = diffSet(pei);
-        if (!s.some((x) => peiTargets.has(x))) return false;
+        if (!setIntersects(s, peiTargets)) return false;
       }
       return true;
     }
@@ -346,6 +392,18 @@ export default function AnalyzeScreen() {
   // 排列五：万位 / 千位
   const [wan, setWan] = useState<number[]>([]);
   const [qian, setQian] = useState<number[]>([]);
+
+  // ── 选号工具补全：组内随机 / 随机交并 / 分组胆 ──
+  const [random1Pool, setRandom1Pool] = useState<number[]>([]); // 允许数字池（空=0-9 全选）
+  const [random1Count, setRandom1Count] = useState(10);
+  const [random1Seed, setRandom1Seed] = useState(0); // 自增以重新随机
+  const [random2Count, setRandom2Count] = useState(10);
+  const [random2Mode, setRandom2Mode] = useState<'inter' | 'union'>('union');
+  const [random2Seed, setRandom2Seed] = useState(0);
+  const [groupPos, setGroupPos] = useState<Position>('any');
+  const [groupAttr, setGroupAttr] = useState<SetAttrKey>('oddEven');
+  const [groupValue, setGroupValue] = useState<string>('奇');
+  const [importText, setImportText] = useState(''); // 粘贴导入框
 
   /** 定位（复式倍数）按位选择的位置槽：3 位=百/十/个，5 位=万/千/百/十/个 */
   const posSlots = useMemo(() => {
@@ -464,6 +522,42 @@ export default function AnalyzeScreen() {
 
   const kl8SeqCodes = kl8SeqOptions[kl8SeqIndex] ?? [];
 
+  // ── 选号工具补全：三个 tab 的结果集（供分析） ──
+  const random1Codes = useMemo(
+    () => genRandomCodes(DD, random1Pool, random1Count, random1Seed),
+    [DD, random1Pool, random1Count, random1Seed],
+  );
+  const random2A = useMemo(
+    () => genRandomCodes(DD, [], random2Count, random2Seed * 2 + 1),
+    [DD, random2Count, random2Seed],
+  );
+  const random2B = useMemo(
+    () => genRandomCodes(DD, [], random2Count, random2Seed * 2 + 2),
+    [DD, random2Count, random2Seed],
+  );
+  const random2Result = useMemo(() => {
+    const A = new Set(random2A);
+    const res = new Set<string>(random2Mode === 'union' ? A : []);
+    for (const c of random2B) {
+      if (random2Mode === 'union' || A.has(c)) res.add(c);
+    }
+    return [...res];
+  }, [random2A, random2B, random2Mode]);
+  const groupCodes = useMemo(() => {
+    const set = SET_ATTRS[groupAttr].values[groupValue];
+    if (!set) return [] as string[];
+    const idx = groupPos === 'any' ? -1 : posIndex(groupPos, DD);
+    const out: string[] = [];
+    eachNumber(DD, (nums) => {
+      if (groupPos === 'any') {
+        if (nums.some((n) => set.has(n))) out.push(nums.join(''));
+      } else if (idx >= 0 && idx < nums.length && set.has(nums[idx])) {
+        out.push(nums.join(''));
+      }
+    });
+    return out;
+  }, [groupAttr, groupValue, groupPos, DD]);
+
   const target: Target = useMemo(() => {
     // 形态模式：按 tab 提取数字，多选形态取并集
     const shapeActive = shapeMainMode === 'zuxuan' || shapeFilters.length > 0;
@@ -527,21 +621,16 @@ export default function AnalyzeScreen() {
     }
     if (tab === 'dan') {
       if (dan.length === 0) return { kind: 'set', codes: new Set() };
-      // 按类型筛选全部 1000 个号码
+      // 按类型筛选全部 10^D 个号码（D=位数，排列五=5 位也正确）
       const codes = new Set<string>();
-      for (let a = 0; a <= 9; a += 1) {
-        for (let b = 0; b <= 9; b += 1) {
-          for (let c = 0; c <= 9; c += 1) {
-            const nums = [a, b, c];
-            if (matchFilter(type, nums, dan, pei)) codes.add(`${a}${b}${c}`);
-          }
-        }
-      }
+      eachNumber(DD, (nums) => {
+        if (matchFilter(type, nums, dan, pei)) codes.add(nums.join(''));
+      });
       return { kind: 'set', codes };
     }
     if (tab === 'dantuo') {
       if (dtDan.length === 0) return { kind: 'set', codes: new Set() };
-      const { zhixuan } = generateDanTuo(dtDan, dtTuo);
+      const { zhixuan } = generateDanTuo(dtDan, dtTuo, DD);
       return { kind: 'set', codes: new Set(zhixuan) };
     }
     if (tab === 'pos') return { kind: 'digit', digit: posDigit, pos };
@@ -557,19 +646,24 @@ export default function AnalyzeScreen() {
         }
         return { kind: 'set', codes: new Set(codes) };
       } else {
-        // 不定位复式：每位从 noposNums 里选，可重复
+        // 不定位复式：每位从 noposNums 里选，可重复（D 位通用）
         if (noposNums.length === 0) return { kind: 'set', codes: new Set() };
+        const allowed = new Set(noposNums);
         const codes = new Set<string>();
-        for (const a of noposNums) for (const b of noposNums) for (const c of noposNums)
-          codes.add(`${a}${b}${c}`);
+        eachNumber(DD, (nums) => {
+          if (nums.every((d) => allowed.has(d))) codes.add(nums.join(''));
+        });
         return { kind: 'set', codes };
       }
     }
     if (tab === 'heji') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
     if (tab === 'amp') return { kind: 'calcAttr', calcKey: hejiKey as any, value: hejiValue };
+    if (tab === 'random1') return { kind: 'set', codes: new Set(random1Codes) };
+    if (tab === 'random2') return { kind: 'set', codes: new Set(random2Result) };
+    if (tab === 'group') return { kind: 'set', codes: new Set(groupCodes) };
     return { kind: 'set', codes: new Set() };
   }, [tab, type, externalCodes, shapeMainMode, shapeFilters, shapeDigits, dan, commonDigit, commonMode, kl8CommonMode, kl8CommonValue, kl8CommonMatchCount, kl8ComboCodes, kl8MatchMode, kl8MatchCount, kl8SeqCodes, kl8DtDan, kl8DtTuo, kl8DtDanCounts, kl8DtTuoCounts, kl8FushiCodes, kl8FushiPlaySize, gameId, dan, pei, dtDan, dtTuo, pos, posDigit,
-    bai, shi, ge, wan, qian, posSlots, multiMode, noposNums, hejiKey, hejiValue]);
+    bai, shi, ge, wan, qian, posSlots, multiMode, noposNums, hejiKey, hejiValue, random1Codes, random2Result, groupCodes]);
 
   const codesCount = useMemo(() => {
     if (target.kind === 'set') return target.codes.size;
@@ -851,9 +945,10 @@ export default function AnalyzeScreen() {
       {tab === 'fushi' && renderFushi()}
       {tab === 'kl8seq' && renderKl8Seq()}
       {tab === 'kl8dt' && renderKl8Dt()}
-      {tab === 'random1' && renderPlaceholder('组内随机')}
-      {tab === 'random2' && renderPlaceholder('随机交并')}
-      {tab === 'group' && renderPlaceholder('分组胆')}
+      {gameId !== 'kl8' && renderPasteImport()}
+      {tab === 'random1' && renderRandom1()}
+      {tab === 'random2' && renderRandom2()}
+      {tab === 'group' && renderGroup()}
       {/* 形态（仅 3D / 排列3） */}
       {(gameId === 'fc3d' || gameId === 'pl3') && (
         <Field caption="形态（主模式 / 过滤）">
@@ -1629,6 +1724,151 @@ export default function AnalyzeScreen() {
       <Text style={styles.hint}>{label} · 开发中</Text>
     </View>
   );
+
+  /** 号码预览框（固定高度滚动，避免长串撑破布局） */
+  const renderCodePreview = (codes: string[]) => (
+    <View style={{ maxHeight: 120, borderWidth: 1, borderColor: semantic.panelBorder, borderRadius: radius.sm, padding: space.xs, backgroundColor: semantic.panelBg }}>
+      <ScrollView nestedScrollEnabled>
+        <Text style={[styles.hint, { lineHeight: 20 }]}>{codes.join('  ')}</Text>
+      </ScrollView>
+    </View>
+  );
+
+  /** 复制/粘贴导入号码（数字彩）：解析后按毒胆方式分析命中走势 */
+  const renderPasteImport = () => (
+    <Field caption="粘贴导入号码">
+      <TextInput
+        style={[styles.numInput, { height: 64, textAlignVertical: 'top' }]}
+        value={importText}
+        onChangeText={setImportText}
+        placeholder="如 123 456 789（空格/逗号分隔，排列五用 5 位）"
+        placeholderTextColor={semantic.textFaint}
+        multiline
+      />
+      <View style={styles.chipRow}>
+        <Chip
+          label="导入并分析"
+          active={false}
+          onPress={() => {
+            const arr = importText.split(/[\s,，、]+/).map((s) => s.trim()).filter(Boolean);
+            if (arr.length > 0) {
+              setExternalCodes(new Set(arr));
+              setTab('dan');
+              setFocusedIdx(null);
+              setPickExpanded(false);
+            }
+          }}
+        />
+        <Chip label="清空" active={false} onPress={() => setImportText('')} />
+      </View>
+      <Text style={styles.hint}>导入后按「毒胆」方式分析这些号码的命中走势（仅数字彩）</Text>
+    </Field>
+  );
+
+  /** 组内随机（分组随机 N中1）：每位从允许池各取一个，生成 count 注 */
+  const renderRandom1 = () => (
+    <>
+      <Field caption="允许数字池">
+        <DigitGrid
+          digits={DIGITS}
+          selected={random1Pool}
+          onToggle={(d) => setRandom1Pool((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]))}
+          columns={6}
+        />
+        <View style={styles.chipRow}>
+          <Chip label="全清(=0-9全选)" active={false} onPress={() => setRandom1Pool([])} />
+        </View>
+        <Text style={styles.hint}>空池=0-9 全允许；组内随机=每位各从中取一个，组成 {DD} 位号码</Text>
+      </Field>
+      <Field caption="生成注数">
+        <DigitGrid
+          digits={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30]}
+          selected={[random1Count]}
+          onToggle={setRandom1Count}
+          columns={6}
+        />
+      </Field>
+      <Field caption="结果">
+        <View style={styles.rowBetween}>
+          <Text style={styles.hint}>共 {random1Codes.length} 注 · 已切入分析</Text>
+          <Chip label="重新生成" active={false} onPress={() => setRandom1Seed((s) => s + 1)} />
+        </View>
+        {renderCodePreview(random1Codes)}
+      </Field>
+    </>
+  );
+
+  /** 随机交并：生成两套随机号，取交集或并集 */
+  const renderRandom2 = () => (
+    <>
+      <Field caption="每组注数">
+        <DigitGrid
+          digits={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20]}
+          selected={[random2Count]}
+          onToggle={setRandom2Count}
+          columns={6}
+        />
+      </Field>
+      <Field caption="结果取">
+        <Segmented
+          options={[{ value: 'union', label: '并集' }, { value: 'inter', label: '交集' }]}
+          value={random2Mode}
+          onChange={(v) => setRandom2Mode(v as 'union' | 'inter')}
+        />
+      </Field>
+      <Field caption="随机集 A（{random2A.length} 注）">{renderCodePreview(random2A)}</Field>
+      <Field caption="随机集 B（{random2B.length} 注）">{renderCodePreview(random2B)}</Field>
+      <Field caption={random2Mode === 'union' ? '并集结果' : '交集结果'}>
+        <View style={styles.rowBetween}>
+          <Text style={styles.hint}>共 {random2Result.length} 注 · 已切入分析</Text>
+          <Chip label="重新生成" active={false} onPress={() => setRandom2Seed((s) => s + 1)} />
+        </View>
+        {renderCodePreview(random2Result)}
+      </Field>
+    </>
+  );
+
+  /** 分组胆：按位置 + 属性分组筛选，产出命中的全部号码集合 */
+  const GROUP_ATTR_KEYS: { id: SetAttrKey; label: string }[] = (
+    Object.keys(SET_ATTRS) as SetAttrKey[]
+  ).map((k) => ({ id: k, label: SET_ATTRS[k].label }));
+  const renderGroup = () => {
+    const attrDef = SET_ATTRS[groupAttr];
+    const values = Object.keys(attrDef.values);
+    return (
+      <>
+        <Field caption="位置">
+          <Segmented
+            options={posOptions.map((p) => ({ value: p, label: POS_LABEL_MAP[p] }))}
+            value={groupPos}
+            onChange={(v) => setGroupPos(v as Position)}
+          />
+        </Field>
+        <Field caption="属性">
+          <Segmented
+            options={GROUP_ATTR_KEYS.map((a) => ({ value: a.id, label: a.label }))}
+            value={groupAttr}
+            onChange={(v) => {
+              const k = v as SetAttrKey;
+              setGroupAttr(k);
+              setGroupValue(Object.keys(SET_ATTRS[k].values)[0]);
+            }}
+          />
+        </Field>
+        <Field caption="取值">
+          <View style={styles.chipRow}>
+            {values.map((val) => (
+              <Chip key={val} label={val} active={groupValue === val} onPress={() => setGroupValue(val)} />
+            ))}
+          </View>
+          <Text style={styles.hint}>
+            分组胆：该位置数字属于所选属性即命中，共 {groupCodes.length} 注 · 已切入分析
+          </Text>
+        </Field>
+      </>
+    );
+  };
+
 
   /** 原型 .bottombar：左侧重置 + 右侧主按钮 */
   const handleReset = () => {
