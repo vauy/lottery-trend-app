@@ -4,7 +4,7 @@
  * 只负责「长什么样 / 怎么摆」，不含任何彩票业务逻辑。
  * 所有屏幕统一从这里取组件，保证视觉一致。
  */
-import { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -23,6 +23,32 @@ import {
   space,
   touch,
 } from '@/lib/theme';
+
+/* ─────────────── UI 密度 ─────────────── */
+
+/**
+ * regular：横屏 / 宽屏，按钮保持标准尺寸，好点按；
+ * compact：竖屏，屏幕高度紧张，按钮/页签整体降一档，
+ *          省下来的高度留给图表，让图表占据更大屏幕空间。
+ */
+export type UiDensity = 'regular' | 'compact';
+
+const DensityContext = createContext<UiDensity>('regular');
+
+export function DensityProvider({
+  value,
+  children,
+}: {
+  value: UiDensity;
+  children: ReactNode;
+}) {
+  return <DensityContext.Provider value={value}>{children}</DensityContext.Provider>;
+}
+
+/** 组件内部读取当前密度，自行决定是否套用紧凑样式 */
+export function useDensity(): UiDensity {
+  return useContext(DensityContext);
+}
 
 /* ─────────────── 容器 ─────────────── */
 
@@ -81,6 +107,7 @@ export function Segmented<T extends string>({
   /** 等分铺满（主导航用）；否则自适应宽度（字段内用） */
   equalWidth?: boolean;
 }) {
+  const dense = useDensity() === 'compact';
   return (
     <View style={styles.segWrap}>
       {options.map((o) => {
@@ -91,12 +118,19 @@ export function Segmented<T extends string>({
             onPress={() => onChange(o.value)}
             style={[
               styles.segBtn,
+              dense && styles.segBtnCompact,
               equalWidth ? { flex: 1 } : undefined,
               on && styles.segBtnOn,
             ]}
             accessibilityState={{ selected: on }}
           >
-            <Text style={[styles.segText, on && styles.segTextOn]}>
+            <Text
+              style={[
+                styles.segText,
+                dense && styles.segTextCompact,
+                on && styles.segTextOn,
+              ]}
+            >
               {o.label}
             </Text>
           </Pressable>
@@ -117,6 +151,7 @@ export function SubTabs<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  const dense = useDensity() === 'compact';
   return (
     <ScrollView
       horizontal
@@ -129,10 +164,16 @@ export function SubTabs<T extends string>({
           <Pressable
             key={it.id}
             onPress={() => onChange(it.id)}
-            style={[styles.subtab, on && styles.subtabOn]}
+            style={[styles.subtab, dense && styles.subtabCompact, on && styles.subtabOn]}
             accessibilityState={{ selected: on }}
           >
-            <Text style={[styles.subtabText, on && styles.subtabTextOn]}>
+            <Text
+              style={[
+                styles.subtabText,
+                dense && styles.subtabTextCompact,
+                on && styles.subtabTextOn,
+              ]}
+            >
               {it.label}
             </Text>
           </Pressable>
@@ -162,6 +203,7 @@ export function DigitGrid({
   /** 列数，默认自适应（RN 用固定列数模拟 auto-fill） */
   columns?: number;
 }) {
+  const dense = useDensity() === 'compact';
   const cols = columns ?? Math.min(digits.length, 10);
   const rows: number[][] = [];
   for (let i = 0; i < digits.length; i += cols) {
@@ -180,6 +222,7 @@ export function DigitGrid({
                 onPress={() => onToggle(d)}
                 style={({ pressed }) => [
                   styles.digit,
+                  dense && styles.digitCompact,
                   on && styles.digitOn,
                   mark === 'hot' && styles.digitHot,
                   mark === 'cold' && styles.digitCold,
@@ -187,7 +230,13 @@ export function DigitGrid({
                 ]}
                 accessibilityState={{ selected: on }}
               >
-                <Text style={[styles.digitText, on && styles.digitTextOn]}>
+                <Text
+                  style={[
+                    styles.digitText,
+                    dense && styles.digitTextCompact,
+                    on && styles.digitTextOn,
+                  ]}
+                >
                   {d}
                 </Text>
               </Pressable>
@@ -210,13 +259,20 @@ export function Chip({
   active: boolean;
   onPress: () => void;
 }) {
+  const dense = useDensity() === 'compact';
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.chip, active && styles.chipOn]}
+      style={[styles.chip, dense && styles.chipCompact, active && styles.chipOn]}
       accessibilityState={{ selected: active }}
     >
-      <Text style={[styles.chipText, active && styles.chipTextOn]}>
+      <Text
+        style={[
+          styles.chipText,
+          dense && styles.chipTextCompact,
+          active && styles.chipTextOn,
+        ]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -441,6 +497,9 @@ const styles = StyleSheet.create({
   },
   segText: { fontSize: fs.sm, color: semantic.textDim },
   segTextOn: { color: semantic.onBrand, fontWeight: '600' },
+  /** 竖屏紧凑档：内边距与字号各降一档 */
+  segBtnCompact: { paddingVertical: 6, paddingHorizontal: 9, minHeight: 32 },
+  segTextCompact: { fontSize: fs.xs },
 
   subtabRow: { gap: 5, paddingBottom: 2 },
   subtab: {
@@ -457,6 +516,9 @@ const styles = StyleSheet.create({
   },
   subtabText: { fontSize: fs.sm, color: semantic.textDim },
   subtabTextOn: { color: semantic.brand, fontWeight: '600' },
+  /** 竖屏紧凑档 */
+  subtabCompact: { paddingVertical: 6, paddingHorizontal: 10 },
+  subtabTextCompact: { fontSize: fs.xs },
 
   digitGrid: { gap: 6 },
   digitRow: { flexDirection: 'row', gap: 6 },
@@ -484,6 +546,9 @@ const styles = StyleSheet.create({
     color: semantic.text,
   },
   digitTextOn: { color: semantic.onDan },
+  /** 竖屏紧凑档：高度 44 → 38，仍高于最小可点按面积的实用下限 */
+  digitCompact: { height: 38, minWidth: 38 },
+  digitTextCompact: { fontSize: fs.sm },
 
   chip: {
     paddingVertical: 8,
@@ -496,6 +561,9 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: alpha(palette.accent, 0.2), borderColor: semantic.brand },
   chipText: { fontSize: fs.sm, color: semantic.textDim },
   chipTextOn: { color: semantic.brand, fontWeight: '600' },
+  /** 竖屏紧凑档 */
+  chipCompact: { paddingVertical: 6, paddingHorizontal: 10 },
+  chipTextCompact: { fontSize: fs.xs },
 
   chartCard: {
     alignSelf: 'stretch',
