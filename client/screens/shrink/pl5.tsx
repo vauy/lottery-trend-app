@@ -14,6 +14,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { Screen } from '@/components/Screen';
+import { BackBar } from '@/components/ui/BackBar';
 import {
   BottomBar,
   Chip,
@@ -444,6 +445,7 @@ export default function Pl5ShrinkScreen() {
       backgroundColor={semantic.pageBg}
       statusBarStyle="light"
     >
+      <BackBar />
       <View style={styles.page}>
         <ScrollView
           style={styles.scroll}

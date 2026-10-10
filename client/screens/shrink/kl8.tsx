@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { Screen } from '@/components/Screen';
+import { BackBar } from '@/components/ui/BackBar';
 import { Legend, Panel } from '@/components/ui/Kit';
 import { fontSize as fs, semantic, space } from '@/lib/theme';
 
@@ -10,6 +11,7 @@ export default function Kl8ShrinkScreen() {
       backgroundColor={semantic.pageBg}
       statusBarStyle="light"
     >
+      <BackBar />
       <View style={styles.page}>
         <Panel label="快乐8 · 缩水">
           <Text style={styles.title}>快乐8 缩水</Text>
