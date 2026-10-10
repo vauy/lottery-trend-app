@@ -143,3 +143,58 @@ frida -U -f cn.com.rhinoceros -l dump_dex.js
 - **双色球**：蓝球走势
 - **会员/运营**（不复刻）：会员购买、邀请奖励、提现、赠会员、VIP 锁指标
 - **注册**：手机号+验证码
+
+## 十、脱壳反编译结果（真实业务代码分析）
+
+> 用户手机 frida 脱壳成功：53 个 dex / 62.9MB，业务代码集中在 `classes03.dex`
+> （1090 个 `cn.com.rhinoceros` 类，jadx 反编译通过）。其余 dex 为 rxjava / 三方 SDK / 系统库。
+
+### 10.1 「中出个数」的真实实现（KLineActivity）
+
+```
+① 对所选号码组合逐个号码统计：该号码在历史开奖中「包含所选胆码组中几个号」的次数
+② 按中出区间 [start, end] 筛选：hits(号码) ∈ [start, end] 的号码留下（"中出结果为空"提示）
+③ 以筛选后的号码集合生成 InstructBean(lotteryType, "中出条件", position, starType, …) 出图
+④ 特殊规则：「上期重复不支持中出条件」；「选中出图」按钮 = 交互确认后出图
+⑤ 「（重）」= 对子/豹子按 1 个号计算；不含「重」时对子豹子按数量计（教程 3.3 一致）
+```
+
+→ 我们实现毒胆「中出个数」时：对每个 0-9 候选，统计历史开奖含胆码的个数区间筛选即可，
+   与 `matchFilter` 的 OR 语义不同，需要新口径（count 语义）。
+
+### 10.2 K线信息行的官方口径（KLineAdapter）
+
+| 图型 | 信息行内容 |
+|---|---|
+| 频率K（普通） | `missPeriod  概率:chanceNumber%` |
+| **多周期** | `missPeriod  当期期数:currentPeriod  已出次:openNumber  概率:chanceNumber%` |
+| 出次K | 只显示 `missPeriod` |
+| 遗漏K / 单周期 | 标题用「遗漏周期」，其余同普通 |
+| 出次类 | 标题用「理论出次」+「统计周期」 |
+
+数据模型 `KLineTargetDataBean`：`targetProba`(理论概率) / `targetOpenProba` / `missPeriod`(遗漏周期) /
+`openNumber`(已出次) / `currentPeriod`(当前周期) / `chanceNumber`(概率%) / `klineData + klineCacheData`(主副图数据)。
+
+### 10.3 图表设置体系
+
+- `avgType`：「裸K」或「BOLL+K线」（BOLL 上中下轨叠加主图）
+- `assitsType`：副图选择（最多 2 个），默认 MACD+BOLL
+- 指标实体全套：BOLL / CCI / DMI / KDJ / EXPMA / MA / MACD / RSI / SAR / VMA / WR
+  —— 我们缺 **CCI、EXPMA、SAR、VMA、WR**（可补进指标面板）
+- 图例控件：点击图例控制系列显隐
+
+### 10.4 遗漏数据模型（LostBean）
+
+- `oneLostEntities / twoLostEntities / threeLostEntities`：一阶/二阶/三阶遗漏序列（与我们的二阶口径对应，官方有三阶）
+- `secondKNumber`：二阶K值；`loseKProba`：遗漏K概率
+
+### 10.5 Repository 一览（数据层）
+
+`NormalKline / NewKline / SsqKline / Aisearch（AI选号）/ GoldenCal（黄金分割）/ GoldenGroup / Tools`
+—— 数据走服务端接口 + 本地 DB，概率表有离线预计算（assets 的 indexproba 等）。
+
+### 10.6 其他可借鉴
+
+- 悬浮球（floatball）：App 内可拖动的快捷菜单，含手写轨迹（HistoryPath）识别
+- 「看别人选什么号码」：社区化选号参考（运营功能，不复刻）
+- 提醒服务（service）：遗漏条件达成通知
