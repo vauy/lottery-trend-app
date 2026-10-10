@@ -107,6 +107,32 @@ export function buildMultiPaneHtml({
   const mainMin = Math.min(0, ...mainY);
   const mainMax = Math.max(0, ...mainY);
 
+  /* ───── tooltip 数据行：每期一条（期号/开高低收/MA/布林三轨），formatter 按 dataIndex 取 ───── */
+  const tooltipRows: string[] = show.map((b, i) => {
+    const hi = b.h ?? Math.max(b.o, b.c);
+    const lo = b.l ?? Math.min(b.o, b.c);
+    const parts = [
+      `${b.issue}`,
+      `开 ${b.o.toFixed(2)}`,
+      `高 ${hi.toFixed(2)}`,
+      `低 ${lo.toFixed(2)}`,
+      `收 ${b.c.toFixed(2)}`,
+    ];
+    maList.forEach((mm) => {
+      const v = mm.data[i];
+      if (v !== null && v !== undefined) parts.push(`MA${mm.period} ${Number(v).toFixed(2)}`);
+    });
+    if (boll) {
+      const up = boll.upper[i];
+      const mid = boll.mid[i];
+      const low = boll.lower[i];
+      if (up !== null && up !== undefined) parts.push(`上轨 ${Number(up).toFixed(2)}`);
+      if (mid !== null && mid !== undefined) parts.push(`中轨 ${Number(mid).toFixed(2)}`);
+      if (low !== null && low !== undefined) parts.push(`下轨 ${Number(low).toFixed(2)}`);
+    }
+    return parts.join('   ');
+  });
+
   /* ───── 各 grid 的高度分配 ─────
    * 踩过的坑：grid.top / height 写**数字**时，ECharts 会把它当像素用，
    * 且 containLabel 会给轴标签额外「撑高」整个 grid —— 主图吃掉大半高度、
@@ -380,6 +406,23 @@ export function buildMultiPaneHtml({
     xAxis: [makeXAxis(0, true), ...subResults.map((_, i) => makeXAxis(i + 1, false))],
     yAxis: yAxes,
     series: [candleSeries, ...maSeries, ...bollSeries, ...subSeries],
+    /* 十字准星：主副图 x 轴联动（对齐官方点击图取该期数据） */
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', lineStyle: { color: MID_COLOR, type: 'dashed', width: 0.8 } },
+      confine: true,
+      backgroundColor: 'rgba(0,0,0,0.82)',
+      borderWidth: 0,
+      padding: [6, 8],
+      textStyle: { color: '#fff', fontSize: 10 },
+      formatter: `${FN}function (params) {
+        var i = params && params.length ? params[0].dataIndex : 0;
+        return tooltipRows[i] || '';
+      }${FN}`,
+    },
+    /* 手势缩放：双指捏合缩放 / 单指左右滑动平移，主副图联动（filterMode none 不改 y 轴范围） */
+    dataZoom: [{ type: 'inside', xAxisIndex: grids.map((_, i) => i), filterMode: 'none' }],
   };
 
   return `<!DOCTYPE html>
@@ -396,6 +439,7 @@ export function buildMultiPaneHtml({
 <body>
   <div id="chart"></div>
   <script>
+    var tooltipRows = ${JSON.stringify(tooltipRows)};
     var chart = echarts.init(document.getElementById('chart'));
     chart.setOption(${serialize(option)});
     window.addEventListener('resize', function () { chart.resize(); });

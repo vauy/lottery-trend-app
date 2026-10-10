@@ -31,6 +31,7 @@ import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
 import { MultiPaneChart } from '@/components/charts/MultiPaneChart';
 import { aggregate, buildBoll, buildOmissionBars, buildChuciSeries, buildChuciMoveSeries, lastBollTriple, missSumDropRate, MISS_SUM_REF, secondOrderFromTheory, type CycleAlign } from '@/components/charts/chartMath';
 import { IndicatorPanel } from '@/components/ui/IndicatorPanel';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DEFAULT_MA,
   type IndicatorId,
@@ -432,6 +433,8 @@ export default function AnalyzeScreen() {
   }, [params.codes]);
 
   const [type, setType] = useState('draw');
+  /** 中出个数（毒胆）：对齐官方「中出条件」——开奖号包含胆码的个数口径 */
+  const [danCount, setDanCount] = useState<'all' | 'c0' | 'c1' | 'c2' | 'allhit'>('all');
   const [commonDigit, setCommonDigit] = useState(5);
   const [kl8ComboCodes, setKl8ComboCodes] = useState<number[]>([]);
   const [kl8MatchMode, setKl8MatchMode] = useState<'all' | 'any' | 'exact'>('all');
@@ -591,10 +594,34 @@ export default function AnalyzeScreen() {
   // ── 副图指标 ──
   /** 主图叠加的均线（6 组，可在指标设置里改周期 / 颜色 / 开关） */
   const [maConfigs, setMaConfigs] = useState<MaConfig[]>(DEFAULT_MA);
+  /** 裸K模式：只画 K 线，隐藏 MA 与布林（对齐官方 avgType「裸K」） */
+  const [bareK, setBareK] = useState(false);
   /** 副图槽位：每个槽位单选一个指标；'none' = 不画该槽 */
   const [sub1, setSub1] = useState<IndicatorId>('macd');
   const [sub2, setSub2] = useState<IndicatorId>('none');
   const [indicatorOpen, setIndicatorOpen] = useState(false);
+
+  // ── 指标设置持久化（MA 配置 + 裸K开关），启动恢复、变更写回 ──
+  const chartIndLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('chart.indicator.v1');
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (Array.isArray(saved?.maConfigs) && saved.maConfigs.length > 0) {
+            setMaConfigs(saved.maConfigs);
+          }
+          if (typeof saved?.bareK === 'boolean') setBareK(saved.bareK);
+        }
+      } catch {}
+      chartIndLoadedRef.current = true;
+    })();
+  }, []);
+  useEffect(() => {
+    if (!chartIndLoadedRef.current) return;
+    AsyncStorage.setItem('chart.indicator.v1', JSON.stringify({ maConfigs, bareK })).catch(() => {});
+  }, [maConfigs, bareK]);
   /** 底部操作栏实测高度：抽屉要避让它，否则会盖住「出图 / 重置」 */
   const [bottomBarH, setBottomBarH] = useState(64);
 
@@ -758,6 +785,15 @@ export default function AnalyzeScreen() {
     }
     if (tab === 'dan') {
       if (dan.length === 0) return { kind: 'set', codes: new Set() };
+      // 中出个数模式：覆盖类型（draw/pair/…）语义，按「包含胆码个数 ∈ [start,end]」命中
+      if (danCount !== 'all') {
+        const [start, end, dedupe] =
+          danCount === 'c0' ? [0, 0, false]
+          : danCount === 'c1' ? [1, 1, false]
+          : danCount === 'c2' ? [2, 2, false]
+          : [dan.length, dan.length, true];
+        return { kind: 'countOfDan', dan, pei, start, end, dedupe };
+      }
       // 目标集合循环外预计算一次；D=5（排列五）10 万次枚举内零分配
       const danPair = new Set<number>();
       for (const d of dan) for (const x of pairGroup(d)) danPair.add(x);
@@ -813,8 +849,12 @@ export default function AnalyzeScreen() {
 
   const codesCount = useMemo(() => {
     if (target.kind === 'set') return target.codes.size;
+    // 中出个数：满足区间的号码注数 = 概率 × 总注数
+    if (target.kind === 'countOfDan') {
+      return Math.round(getProbability(target, V, DD, samplingMode) * Math.pow(V, DD));
+    }
     return 1;
-  }, [target]);
+  }, [target, V, DD, samplingMode]);
 
   const series = useMemo(() => {
     if (records.length === 0) return [];
@@ -909,6 +949,27 @@ export default function AnalyzeScreen() {
     };
     return m;
   }, [period, stepPeriod]);
+
+  /**
+   * 图卡信息行（对齐官方口径，KLineAdapter 的 caption/tvPro/tvMiss 文案）：
+   * - 频率K（period=1）：`理论周期:x.x  遗漏:n  概率:p%`
+   * - 周期K线（period>1）：`遗漏:n  已出次:x  当期期号:xxx  概率:p%`（官方多周期信息行）
+   * - 遗漏K：`遗漏周期:x.x  当前遗漏:n`
+   * - 出次类：`理论出次:x.x  统计周期:N`
+   */
+  const chartHeaderMeta = (m: ChartMode): string => {
+    const last = series.length > 0 ? series[series.length - 1] : null;
+    const pct = `${(getProbability(target, V, DD, samplingMode) * 100).toFixed(1)}%`;
+    if (m === 'freq') {
+      return period > 1
+        ? `遗漏:${last?.omission ?? 0}  已出次:${last?.cumHit ?? 0}  当期期号:${last?.issue ?? '—'}  概率:${pct}`
+        : `理论周期:${theoryMiss.toFixed(2)}  遗漏:${last?.omission ?? 0}  概率:${pct}`;
+    }
+    if (m === 'omissionK') return `遗漏周期:${theoryMiss.toFixed(2)}  当前遗漏:${last?.omission ?? 0}`;
+    if (m === 'omissionLine') return `遗漏周期:${theoryMiss.toFixed(2)}`;
+    if (m === 'chuci' || m === 'chuciMove') return `理论出次:${theoryMiss.toFixed(2)}  统计周期:${stepPeriod}`;
+    return chartMeta[m].meta;
+  };
 
   // 全历史最大遗漏（用未截断的 allRecords 计算）
   const historyMaxMiss = useMemo(() => {
@@ -1316,18 +1377,42 @@ export default function AnalyzeScreen() {
   ];
 
   const renderTypeRow = () => (
-    <Field caption="类型">
-      <View style={styles.chipRow}>
-        {TYPE_OPTIONS.map((t) => (
-          <Chip
-            key={t.id}
-            label={t.label}
-            active={type === t.id}
-            onPress={() => { setType(t.id); setDan([]); setPei([]); }}
-          />
-        ))}
-      </View>
-    </Field>
+    <>
+      <Field caption="类型">
+        <View style={styles.chipRow}>
+          {TYPE_OPTIONS.map((t) => (
+            <Chip
+              key={t.id}
+              label={t.label}
+              active={type === t.id}
+              onPress={() => { setType(t.id); setDan([]); setPei([]); setDanCount('all'); }}
+            />
+          ))}
+        </View>
+      </Field>
+      {/* 中出个数（对齐官方「中出条件」）：开奖号包含胆码的个数口径；仅毒胆 tab 提供 */}
+      {tab === 'dan' && (
+        <Field caption="中出个数">
+          <View style={styles.chipRow}>
+            {([
+              ['all', '全部'],
+              ['c0', '0个'],
+              ['c1', '1个'],
+              ['c2', '2个'],
+              ['allhit', '全出(重)'],
+            ] as [typeof danCount, string][]).map(([v, label]) => (
+              <Chip key={v} label={label} active={danCount === v} onPress={() => setDanCount(v)} />
+            ))}
+          </View>
+          {danCount !== 'all' && (
+            <Text style={styles.hint} numberOfLines={2}>
+              中出条件：开奖号中包含所选胆码的个数满足所选档位即命中
+              {danCount === 'allhit' ? '（对子/豹子按 1 个号计）' : ''}
+            </Text>
+          )}
+        </Field>
+      )}
+    </>
   );
 
   const renderDigitRow = (
@@ -2279,13 +2364,16 @@ export default function AnalyzeScreen() {
       return (
         <MultiPaneChart
           bars={bars}
-          maConfigs={maConfigs}
-          showBoll
+          maConfigs={bareK ? [] : maConfigs}
+          showBoll={!bareK}
           indicators={activeSubs}
           height={h}
           width={w}
           title={`${chartMeta[m].title} · ${label}`}
-          metaLine={`上轨 ${fmt(tri.upper)} 中轨 ${fmt(tri.mid)} 下轨 ${fmt(tri.lower)}`}
+          metaLine={[
+            chartHeaderMeta(m),
+            `上轨 ${fmt(tri.upper)} 中轨 ${fmt(tri.mid)} 下轨 ${fmt(tri.lower)}`,
+          ].filter(Boolean).join('  ')}
         />
       );
     }
@@ -2692,7 +2780,7 @@ export default function AnalyzeScreen() {
               {chartModes.map((m) => (
                 // 横竖屏都是一列一表，故统一用 100% 宽度，不再按 chartColW 取半宽
                 <View key={m} style={styles.chartCell}>
-                  <ChartCard title={chartMeta[m].title} meta={chartMeta[m].meta}>
+                  <ChartCard title={chartMeta[m].title} meta={chartHeaderMeta(m)}>
                     {renderChart(
                       m,
                       chartW,
@@ -3060,11 +3148,14 @@ export default function AnalyzeScreen() {
         onClose={() => setIndicatorOpen(false)}
         maConfigs={maConfigs}
         onMaChange={setMaConfigs}
+        bareK={bareK}
+        onBareKChange={setBareK}
         sub1={sub1}
         sub2={sub2}
         onSubChange={(slot, id) => (slot === 1 ? setSub1(id) : setSub2(id))}
         onReset={() => {
           setMaConfigs(DEFAULT_MA);
+          setBareK(false);
           setSub1('macd');
           setSub2('none');
         }}

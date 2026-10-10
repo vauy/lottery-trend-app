@@ -173,7 +173,13 @@ export type Target =
   | { kind: 'kl8Combo'; codes: number[]; matchMode: Kl8MatchMode; matchCount?: number }
   | { kind: 'kl8Dantuo'; dan: number[]; tuo: number[]; danCounts: number[]; tuoCounts: number[] }
   | { kind: 'kl8Fushi'; codes: number[]; playSize: number }
-  | { kind: 'shapeSet'; codes: Set<string>; shapeLabel: string };
+  | { kind: 'shapeSet'; codes: Set<string>; shapeLabel: string }
+  /**
+   * 中出个数（对齐官方「中出条件」）：开奖号中包含 dan 的个数 ∈ [start, end]。
+   * dedupe=true 表示「重」口径——对子/豹子按 1 个号计算（unique 去重）；
+   * dedupe=false 按出现次数计。pei 为配码（任一命中才整条命中，沿用 draw 语义）。
+   */
+  | { kind: 'countOfDan'; dan: number[]; pei: number[]; start: number; end: number; dedupe: boolean };
 
 // ==================== 命中判定 ====================
 
@@ -287,6 +293,23 @@ export function isHit(record: DrawRecord, target: Target, prevRecord?: DrawRecor
       for (const n of nums) if (codeSet.has(n)) hit += 1;
       return hit >= target.playSize;
     }
+    case 'countOfDan': {
+      // 中出个数：开奖号包含胆码的个数落在 [start, end] 才命中
+      const danSet = new Set(target.dan);
+      let c: number;
+      if (target.dedupe) {
+        // 「重」口径：对子/豹子按 1 个号计算
+        const seen = new Set<number>();
+        for (const n of nums) if (danSet.has(n)) seen.add(n);
+        c = seen.size;
+      } else {
+        c = 0;
+        for (const n of nums) if (danSet.has(n)) c += 1;
+      }
+      if (c < target.start || c > target.end) return false;
+      if (target.pei.length > 0 && !target.pei.some((p) => nums.includes(p))) return false;
+      return true;
+    }
     case 'shapeSet': {
       const sorted = [...nums].sort((a, b) => a - b).join('');
       return target.codes.has(sorted);
@@ -346,6 +369,12 @@ export function getProbability(
     }
     case 'set': {
       return target.codes.size / Math.pow(V, D);
+    }
+    case 'countOfDan': {
+      // 仅数字型游戏（V≤10 位枚举）；kl8 等大号池不提供该口径
+      if (V > 10) return D / V;
+      const cnt = countCombinations(V, D, (nums) => isHit({ nums } as unknown as DrawRecord, target));
+      return cnt / Math.pow(V, D);
     }
     case 'kl8Combo': {
       // 超几何分布：从 V 个号开 D 个；选 N 个号
@@ -539,6 +568,10 @@ export function getTargetLabel(target: Target): string {
       return `${CALC_ATTRS[target.calcKey].label} = ${target.value}`;
     case 'set':
       return `缩水集合（${target.codes.size}注）`;
+    case 'countOfDan': {
+      const span = target.start === target.end ? `${target.start}个` : `${target.start}-${target.end}个`;
+      return `中出${span}${target.dedupe ? '(重)' : ''} · 胆[${target.dan.join('')}]`;
+    }
     case 'kl8Combo': {
       const codes = target.codes.map((c) => String(c).padStart(2, '0')).join(' ');
       const mode = target.matchMode === 'all' ? '全中'
@@ -573,6 +606,8 @@ export function getTargetShortLabel(target: Target): string {
       return `${CALC_ATTRS[target.calcKey].label}${target.value}`;
     case 'set':
       return `集合(${target.codes.size})`;
+    case 'countOfDan':
+      return `中出${target.start}个`;
     case 'kl8Combo': {
       const mode = target.matchMode === 'all' ? '全中'
         : target.matchMode === 'any' ? '任意'

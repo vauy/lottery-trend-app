@@ -30,6 +30,9 @@ export interface IndicatorPanelProps {
   /** 均线配置（6 组） */
   maConfigs: MaConfig[];
   onMaChange: (next: MaConfig[]) => void;
+  /** 裸K模式：只画 K 线，隐藏 MA 与布林（对齐官方 avgType「裸K」） */
+  bareK: boolean;
+  onBareKChange: (v: boolean) => void;
   /** 副图槽位当前指标 */
   sub1: IndicatorId;
   sub2: IndicatorId;
@@ -50,6 +53,8 @@ export function IndicatorPanel({
   onClose,
   maConfigs,
   onMaChange,
+  bareK,
+  onBareKChange,
   sub1,
   sub2,
   onSubChange,
@@ -118,9 +123,20 @@ export function IndicatorPanel({
           </ScrollView>
           <View style={styles.divider} />
 
-          {/* ───── MA：6 组均线 ───── */}
+          {/* ───── MA：裸K开关 + 6 组均线 ───── */}
           {tab === 'ma' && (
             <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
+              <View style={styles.maRow}>
+                <Pressable onPress={() => onBareKChange(!bareK)} style={styles.switchWrap}>
+                  <View style={[styles.switch, bareK && styles.switchOn]}>
+                    <View style={[styles.switchDot, bareK && styles.switchDotOn]} />
+                  </View>
+                </Pressable>
+                <Text style={[styles.maName, bareK && styles.dim]}>裸K模式</Text>
+                <Text style={styles.bareKHint} numberOfLines={1}>
+                  只画K线 · 隐藏MA与布林
+                </Text>
+              </View>
               {maConfigs.map((c, i) => (
                 <View key={i} style={styles.maRow}>
                   <Pressable
@@ -248,6 +264,7 @@ const styles = StyleSheet.create({
   switchDotOn: { backgroundColor: '#fff', alignSelf: 'flex-end' },
   maName: { fontSize: fs.sm, color: semantic.text, fontWeight: '600', minWidth: 54 },
   dim: { color: semantic.textFaint },
+  bareKHint: { fontSize: fs.xs, color: semantic.textFaint, marginLeft: 'auto' },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' },
   stepBtn: {
     width: 26,
