@@ -261,23 +261,34 @@ export function Chip({
   label,
   active,
   onPress,
+  pill,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
+  /**
+   * 参考图那种「小胶囊」样式：更矮、更窄、圆角更大、字号更小，
+   * 用于指标栏 / 周期 / 范围这类密集排布的一行按钮。
+   */
+  pill?: boolean;
 }) {
   const dense = useDensity() === 'compact';
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.chip, dense && styles.chipCompact, active && styles.chipOn]}
+      style={[
+        pill ? styles.chipPill : styles.chip,
+        !pill && dense && styles.chipCompact,
+        pill && dense && styles.chipPillCompact,
+        active && (pill ? styles.chipPillOn : styles.chipOn),
+      ]}
       accessibilityState={{ selected: active }}
     >
       <Text
         style={[
-          styles.chipText,
-          dense && styles.chipTextCompact,
-          active && styles.chipTextOn,
+          pill ? styles.chipPillText : styles.chipText,
+          !pill && dense && styles.chipTextCompact,
+          active && (pill ? styles.chipPillTextOn : styles.chipTextOn),
         ]}
       >
         {label}
@@ -587,6 +598,19 @@ const styles = StyleSheet.create({
   /** 竖屏紧凑档 */
   chipCompact: { paddingVertical: 6, paddingHorizontal: 10 },
   chipTextCompact: { fontSize: fs.xs },
+  /** 参考图的小胶囊按钮：矮、窄、大圆角、小字 */
+  chipPill: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    backgroundColor: 'transparent',
+  },
+  chipPillCompact: { paddingVertical: 2, paddingHorizontal: 7 },
+  chipPillOn: { backgroundColor: semantic.brand, borderColor: semantic.brand },
+  chipPillText: { fontSize: fs.micro, color: semantic.textDim },
+  chipPillTextOn: { color: semantic.onBrand, fontWeight: '700' },
 
   chartCard: {
     alignSelf: 'stretch',

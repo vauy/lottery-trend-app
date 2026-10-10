@@ -31,6 +31,7 @@ import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
 import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
 import { buildDigitStats } from '@/lib/lottery/analysis';
+import { PickSheet } from '@/components/ui/PickSheet';
 import {
   BottomBar,
   ChartCard,
@@ -324,7 +325,6 @@ export default function AnalyzeScreen() {
   const [period, setPeriod] = useState(1);
   const [chartModes, setChartModes] = useState<ChartMode[]>(['freq']);
   const [compareTargets, setCompareTargets] = useState<Target[] | null>(null);
-  const [topCollapsed, setTopCollapsed] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [dataTaskRunning, setDataTaskRunning] = useState(false);
   const [dataTaskMsg, setDataTaskMsg] = useState('');
@@ -332,6 +332,8 @@ export default function AnalyzeScreen() {
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   /** 图表缩放倍率（放大/缩小按钮调整图表高度） */
   const [chartZoom, setChartZoom] = useState(1);
+  /** 选号抽屉是否展开（用于决定图表可用高度） */
+  const [pickExpanded, setPickExpanded] = useState(false);
   /** 全屏：隐藏品牌栏/彩种/导航等 chrome，把整屏留给图表 */
   const [fullscreen, setFullscreen] = useState(false);
   /** 横屏时收起顶部 chrome（品牌栏 + 主导航 + 子页签），保留彩种与操作栏 */
@@ -653,27 +655,15 @@ export default function AnalyzeScreen() {
     ? Math.round(Math.min(160, Math.max(110, tongW / 2.8)))
     : 140;
 
-  // 选号面板手动覆盖：横屏默认收起，用户点开后为 true
-  const [pickOverride, setPickOverride] = useState<boolean | null>(null);
   /**
-   * 选号面板收起态。
-   * 横屏屏幕只有 ~360dp 高，选号面板一展开（数字格 + 形态 + 类型行）
-   * 就会把图表压成中间一条、上下全是按钮 —— 实测截图正是这个症状。
-   * 因此横屏默认收起，想看选号时手动点开。
+   * 选号已搬进底部抽屉，页面内不再有「选号面板折叠」这回事。
+   * 抽屉收起时只占 12% 高度，图表拿走剩下的全部空间。
    */
-  const pickCollapsed = fullscreen
-    ? true
-    : isLandscape
-      ? pickOverride !== true
-      : topCollapsed;
-  const togglePickPanel = () => {
-    if (isLandscape) setPickOverride(pickCollapsed);
-    else setTopCollapsed((v) => !v);
-  };
+  const pickCollapsed = !pickExpanded;
 
   // 图表可用高度（同屏放大 / 振幅图用）
   // 全屏时只剩顶部一条 34px 的操作条，可用高度接近整屏
-  const TOP_BAR_H = fullscreen ? 34 : pickCollapsed ? 30 : 180;
+  const TOP_BAR_H = fullscreen ? 34 : pickCollapsed ? 44 : 180;
   const availH = Math.max(140, height - TOP_BAR_H);
 
   /** 竖屏紧凑：按钮/页签降一档，把省下的高度让给图表 */
@@ -689,6 +679,53 @@ export default function AnalyzeScreen() {
       // 规避浮点累积误差（0.1+0.2 问题），统一保留两位
       return Math.round(next * 100) / 100;
     });
+
+  /**
+   * 选号内容（供底部抽屉复用）。
+   * 原来内联在页面滚动区里，选号一展开就把图表挤没了；
+   * 现在整块搬进 PickSheet，页面主体只留图表与数据。
+   */
+  const renderPickContent = () => (
+    <>
+      {tab === 'common' && renderCommon()}
+      {(tab === 'dan' || tab === 'dantuo') && renderTypeRow()}
+      {tab === 'dan' && renderDan()}
+      {tab === 'dantuo' && renderDantuo()}
+      {tab === 'pos' && renderPos()}
+      {tab === 'multi' && renderMulti()}
+      {tab === 'heji' && renderHeji()}
+      {tab === 'amp' && renderAmp()}
+      {tab === 'combo' && renderCombo()}
+      {tab === 'fushi' && renderFushi()}
+      {tab === 'kl8seq' && renderKl8Seq()}
+      {tab === 'kl8dt' && renderKl8Dt()}
+      {tab === 'random1' && renderPlaceholder('组内随机')}
+      {tab === 'random2' && renderPlaceholder('随机交并')}
+      {tab === 'group' && renderPlaceholder('分组胆')}
+      {/* 形态（仅 3D / 排列3） */}
+      {(gameId === 'fc3d' || gameId === 'pl3') && (
+        <Field caption="形态（主模式 / 过滤）">
+          <View style={styles.chipRow}>
+            <Chip
+              label="组选"
+              active={shapeMainMode === 'zuxuan'}
+              onPress={() => setShapeMainMode(shapeMainMode === 'zuxuan' ? 'zhixuan' : 'zuxuan')}
+            />
+            <Chip
+              label="组三"
+              active={shapeFilters.includes('zusan')}
+              onPress={() => setShapeFilters((prev) => prev.includes('zusan') ? prev.filter((x) => x !== 'zusan') : [...prev, 'zusan'])}
+            />
+            <Chip
+              label="组六"
+              active={shapeFilters.includes('zuliu')}
+              onPress={() => setShapeFilters((prev) => prev.includes('zuliu') ? prev.filter((x) => x !== 'zuliu') : [...prev, 'zuliu'])}
+            />
+          </View>
+        </Field>
+      )}
+    </>
+  );
 
   /** 图表缩放 + 全屏操作条 */
   const renderZoomBar = () => (
@@ -1229,7 +1266,7 @@ export default function AnalyzeScreen() {
     const sorted = [...dan].sort((a, b) => a - b);
     const targets: Target[] = sorted.map((d) => ({ kind: 'digit', digit: d, pos: 'any' }));
     setCompareTargets(targets);
-    setTopCollapsed(true);
+    setPickExpanded(false);
   };
 
   /** 生成"毒胆对码同屏"：每个胆码 + 对码各一张 */
@@ -1242,7 +1279,7 @@ export default function AnalyzeScreen() {
       targets.push({ kind: 'digit', digit: pairNum, pos: 'any' });
     }
     setCompareTargets(targets);
-    setTopCollapsed(true);
+    setPickExpanded(false);
   };
 
   /** 二码合、二码差同屏 */
@@ -1253,7 +1290,7 @@ export default function AnalyzeScreen() {
       { kind: 'calcAttr', calcKey: 'pairDiffMax', value: dan[0] },
     ];
     setCompareTargets(targets);
-    setTopCollapsed(true);
+    setPickExpanded(false);
   };
 
   const renderDan = () => (
@@ -1271,7 +1308,7 @@ export default function AnalyzeScreen() {
           <Chip
             label="退出同屏"
             active={false}
-            onPress={() => { setCompareTargets(null); setTopCollapsed(false); setFocusedIdx(null); }}
+            onPress={() => { setCompareTargets(null); setPickExpanded(false); setFocusedIdx(null); }}
           />
         </>
       ))}
@@ -1464,7 +1501,7 @@ export default function AnalyzeScreen() {
       <Field caption="周期">
         <View style={styles.chipRow}>
           {[1, 2, 3, 5, 10].map((p) => (
-            <Chip key={`pd-${p}`} label={String(p)} active={period === p} onPress={() => setPeriod(p)} />
+            <Chip key={`pd-${p}`} label={String(p)} active={period === p} pill onPress={() => setPeriod(p)} />
           ))}
         </View>
       </Field>
@@ -1593,7 +1630,7 @@ export default function AnalyzeScreen() {
             <Chip
               label="退出同屏"
               active={false}
-              onPress={() => { setCompareTargets(null); setTopCollapsed(false); setFocusedIdx(null); }}
+              onPress={() => { setCompareTargets(null); setPickExpanded(false); setFocusedIdx(null); }}
             />
           </View>
         </>
@@ -1682,7 +1719,7 @@ export default function AnalyzeScreen() {
                 </Pressable>
               )}
               <Pressable
-                onPress={togglePickPanel}
+                onPress={() => setPickExpanded((v) => !v)}
                 style={[styles.iconBtn, isLandscape && styles.iconBtnLandscape]}
                 accessibilityState={{ expanded: !pickCollapsed }}
               >
@@ -1763,53 +1800,6 @@ export default function AnalyzeScreen() {
           contentContainerStyle={[styles.contentInner, { paddingHorizontal: contentPad }]}
           showsVerticalScrollIndicator={false}
         >
-          {/* 选号面板（收起时只留展开条；全屏时整块不渲染） */}
-          {fullscreen ? null : pickCollapsed ? (
-            <Pressable onPress={togglePickPanel} style={styles.expandBar}>
-              <Text style={styles.expandText}>▼ 展开选号</Text>
-            </Pressable>
-          ) : (
-            <Panel label="选 号" right={<Text style={styles.panelRight}>{game.name}</Text>}>
-              {tab === 'common' && renderCommon()}
-              {(tab === 'dan' || tab === 'dantuo') && renderTypeRow()}
-              {tab === 'dan' && renderDan()}
-              {tab === 'dantuo' && renderDantuo()}
-              {tab === 'pos' && renderPos()}
-              {tab === 'multi' && renderMulti()}
-              {tab === 'heji' && renderHeji()}
-              {tab === 'amp' && renderAmp()}
-              {tab === 'combo' && renderCombo()}
-              {tab === 'fushi' && renderFushi()}
-              {tab === 'kl8seq' && renderKl8Seq()}
-              {tab === 'kl8dt' && renderKl8Dt()}
-              {tab === 'random1' && renderPlaceholder('组内随机')}
-              {tab === 'random2' && renderPlaceholder('随机交并')}
-              {tab === 'group' && renderPlaceholder('分组胆')}
-              {/* 形态（仅 3D / 排列3） */}
-              {(gameId === 'fc3d' || gameId === 'pl3') && (
-                <Field caption="形态（主模式 / 过滤）">
-                  <View style={styles.chipRow}>
-                    <Chip
-                      label="组选"
-                      active={shapeMainMode === 'zuxuan'}
-                      onPress={() => setShapeMainMode(shapeMainMode === 'zuxuan' ? 'zhixuan' : 'zuxuan')}
-                    />
-                    <Chip
-                      label="组三"
-                      active={shapeFilters.includes('zusan')}
-                      onPress={() => setShapeFilters((prev) => prev.includes('zusan') ? prev.filter((x) => x !== 'zusan') : [...prev, 'zusan'])}
-                    />
-                    <Chip
-                      label="组六"
-                      active={shapeFilters.includes('zuliu')}
-                      onPress={() => setShapeFilters((prev) => prev.includes('zuliu') ? prev.filter((x) => x !== 'zuliu') : [...prev, 'zuliu'])}
-                    />
-                  </View>
-                </Field>
-              )}
-            </Panel>
-          )}
-
           {/* 数据 / 期数面板（全屏时隐藏，空间全留给图表） */}
           {!fullscreen && <Panel label="数 据">{renderDataBar()}</Panel>}
 
@@ -1822,6 +1812,7 @@ export default function AnalyzeScreen() {
                     key={c.id}
                     label={c.label}
                     active={chartModes.includes(c.id)}
+                    pill
                     onPress={() => toggleChart(c.id)}
                   />
                 ))}
@@ -1902,6 +1893,18 @@ export default function AnalyzeScreen() {
             </View>
           )}
         </ScrollView>
+
+        {/* ───── 选号抽屉：从底部上下拉开，内容可上下滑动 ───── */}
+        {!fullscreen && (
+          <PickSheet
+            tabLabel={TABS.find((t) => t.id === tab)?.label ?? '选号'}
+            gameName={game.name}
+            expanded={pickExpanded}
+            onChange={setPickExpanded}
+          >
+            {renderPickContent()}
+          </PickSheet>
+        )}
 
         {/* ───── bottombar 底部操作栏（全屏时隐藏） ───── */}
         {!fullscreen && (
