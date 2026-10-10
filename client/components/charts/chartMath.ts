@@ -31,6 +31,39 @@ export function aggregate(series: TargetPoint[], period: number): KBar[] {
   return out;
 }
 
+/**
+ * 遗漏 K 线的「爬楼梯」实体，供多联图复用。
+ * 原来这段写在 EChartsOmissionKChart 内部，多联图要拿同一份数值算副图指标，
+ * 若再抄一份就会两处漂移，故提到这里作为唯一来源。
+ */
+export type OmissionBar = KBar & { isRed: boolean };
+
+function calcDelta(prevMiss: number, theoryMiss: number): number {
+  if (theoryMiss <= 0) return 1;
+  if (prevMiss <= theoryMiss) return 1;
+  const level = Math.ceil(prevMiss / theoryMiss) - 1;
+  const mult = ((level - 1) % 3) + 1;
+  return -mult;
+}
+
+/**
+ * 只在「开出」的那期生成一根 K：
+ * 未超出理论遗漏 → 升 1 档（红）；超出 → 按超出档数循环降档（绿）。
+ */
+export function buildOmissionBars(series: TargetPoint[], theoryMiss: number): OmissionBar[] {
+  const out: OmissionBar[] = [];
+  let score = 0;
+  for (let i = 0; i < series.length; i += 1) {
+    if (series[i].hit === 1) {
+      const prevMiss = i === 0 ? 0 : series[i - 1].omission;
+      const delta = calcDelta(prevMiss, theoryMiss);
+      out.push({ issue: series[i].issue, o: score, c: score + delta, isRed: delta > 0 });
+      score += delta;
+    }
+  }
+  return out;
+}
+
 /** 布林通道（中轨 = SMA，上下轨 = ±k 倍标准差） */
 export function buildBoll(
   values: number[],
