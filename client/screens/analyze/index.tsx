@@ -25,13 +25,22 @@ import { EChartsOmissionKChart } from '@/components/charts/EChartsOmissionKChart
 // 注：原 Skia 版原始值走势图已改用 EChartsRawChart（WebView 渲染），
 // 以保证 App 可在 Expo Go（Termux 热更新）运行，不依赖自定义原生模块。
 import { EChartsRawChart } from '@/components/charts/EChartsRawChart';
+import { MultiPaneChart } from '@/components/charts/MultiPaneChart';
+import { aggregate, buildBoll, buildOmissionBars, lastBollTriple } from '@/components/charts/chartMath';
+import { IndicatorPanel } from '@/components/ui/IndicatorPanel';
+import {
+  DEFAULT_MA,
+  INDICATOR_META,
+  type IndicatorId,
+  type MaConfig,
+} from '@/lib/charts/indicators';
 import { buildRawSeries, buildShapeCodes, getTargetLabel, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
 import { buildTargetSeries, getTheoryMiss, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
 import { buildDigitStats } from '@/lib/lottery/analysis';
-import { PickSheet } from '@/components/ui/PickSheet';
+import { PickSheet, PEEK_H } from '@/components/ui/PickSheet';
 import {
   BottomBar,
   ChartCard,
@@ -339,6 +348,16 @@ export default function AnalyzeScreen() {
   /** 横屏时收起顶部 chrome（品牌栏 + 主导航 + 子页签），保留彩种与操作栏 */
   const [chromeCollapsed, setChromeCollapsed] = useState(false);
 
+  // ── 副图指标 ──
+  /** 主图叠加的均线（6 组，可在指标设置里改周期 / 颜色 / 开关） */
+  const [maConfigs, setMaConfigs] = useState<MaConfig[]>(DEFAULT_MA);
+  /** 副图槽位：每个槽位单选一个指标；'none' = 不画该槽 */
+  const [sub1, setSub1] = useState<IndicatorId>('macd');
+  const [sub2, setSub2] = useState<IndicatorId>('none');
+  const [indicatorOpen, setIndicatorOpen] = useState(false);
+  /** 底部操作栏实测高度：抽屉要避让它，否则会盖住「出图 / 重置」 */
+  const [bottomBarH, setBottomBarH] = useState(64);
+
   const V = game.digitMax - game.digitMin + 1;
   const DD = game.digitCount;
   const samplingMode: SamplingMode = gameId === 'kl8' ? 'hypergeometric' : 'independent';
@@ -632,6 +651,19 @@ export default function AnalyzeScreen() {
   /** 图表卡片边框 1dp ×2 + 内边距 8dp ×2 */
   const CHART_CARD_INSET = 18;
   const chartW = Math.max(160, contentW - CHART_CARD_INSET);
+
+  /**
+   * 带副图指标时的主图高度：按用户要求「频率K线 / 遗漏图高度再增加一半」。
+   * 副图要吃掉 22%~26% 的高度，主图不加成就会被压成一条缝。
+   * 用 1.5 倍并夹上限，避免横屏下整屏塞不进一张图。
+   */
+  const chartHBig = Math.round(Math.min(chartH * 1.5, isLandscape ? 420 : 340));
+
+  /** 当前生效的副图指标（去掉 'none'，最多 2 个） */
+  const activeSubs = useMemo(
+    () => [sub1, sub2].filter((i): i is Exclude<IndicatorId, 'none'> => i !== 'none'),
+    [sub1, sub2],
+  );
 
   /**
    * 毒胆同屏布局。
@@ -1527,7 +1559,12 @@ export default function AnalyzeScreen() {
     </>
   );
 
-  /** 图表渲染：只统一容器，组件 props 与原来一致 */
+  /**
+   * 图表渲染：只统一容器，组件 props 与原来一致。
+   * 频率K线 / 遗漏K线在有副图指标时改走 MultiPaneChart：
+   * 主图 + 副图放同一个 WebView（多 grid），x 轴天然对齐，也最省性能。
+   * 遗漏图 / 二阶遗漏图是折线，没有 K 线实体，副图无从计算，保持原组件。
+   */
   const renderChart = (
     m: ChartMode,
     w: number,
@@ -1538,6 +1575,28 @@ export default function AnalyzeScreen() {
     label: string,
     historyMax?: number,
   ) => {
+    if (activeSubs.length > 0 && (m === 'freq' || m === 'omissionK')) {
+      const bars = m === 'freq' ? aggregate(s, period) : buildOmissionBars(s, tMiss);
+      // 右上角「上轨 / 中轨 / 下轨」数值行（参考图的指标栏）
+      const cv = bars.map((b) => b.c);
+      const bl = cv.length >= 2
+        ? buildBoll(cv, Math.min(20, Math.max(2, cv.length)), 2)
+        : null;
+      const tri = bl ? lastBollTriple(bl) : {};
+      const fmt = (v?: number) => (v === undefined ? '—' : v.toFixed(2));
+      return (
+        <MultiPaneChart
+          bars={bars}
+          maConfigs={maConfigs}
+          showBoll
+          indicators={activeSubs}
+          height={h}
+          width={w}
+          title={`${CHART_META[m].title} · ${label}`}
+          metaLine={`上轨 ${fmt(tri.upper)} 中轨 ${fmt(tri.mid)} 下轨 ${fmt(tri.lower)}`}
+        />
+      );
+    }
     if (m === 'freq') {
       return (
         <EChartsFreqKChart
@@ -1797,13 +1856,19 @@ export default function AnalyzeScreen() {
         {/* ───── content 内容区 ───── */}
         <ScrollView
           style={styles.content}
-          contentContainerStyle={[styles.contentInner, { paddingHorizontal: contentPad }]}
+          contentContainerStyle={[
+            styles.contentInner,
+            {
+              paddingHorizontal: contentPad,
+              // 底部抽屉收起时仍露出一条把手，内容要给它让位，否则最后一行被压住
+              paddingBottom: fullscreen ? space.md : PEEK_H + bottomBarH,
+            },
+          ]}
           showsVerticalScrollIndicator={false}
         >
-          {/* 数据 / 期数面板（全屏时隐藏，空间全留给图表） */}
-          {!fullscreen && <Panel label="数 据">{renderDataBar()}</Panel>}
-
-          {/* 图表类型 + 缩放 + 图例 */}
+          {/* 图表类型 + 缩放 + 图例
+              图表整体上移到数据面板之上：用户明确要求「四个主要图表不要放到最下面」。
+              选号已搬进底部抽屉，所以图表上面只剩这一条控制栏。 */}
           {!fullscreen && tab !== 'amp' && (
             <Panel label="图 表">
               <View style={styles.chipRow}>
@@ -1816,7 +1881,21 @@ export default function AnalyzeScreen() {
                     onPress={() => toggleChart(c.id)}
                   />
                 ))}
+                {/* 副图指标 + 均线参数 */}
+                <Chip
+                  label="指标"
+                  active={activeSubs.length > 0}
+                  pill
+                  onPress={() => setIndicatorOpen(true)}
+                />
               </View>
+              {activeSubs.length > 0 && (
+                <Text style={styles.hint}>
+                  副图 {activeSubs.map((i) => INDICATOR_META[i].label).join(' / ')}
+                  {' · 均线 '}
+                  {maConfigs.filter((c) => c.enabled).map((c) => `MA${c.period}`).join(' ') || '关'}
+                </Text>
+              )}
               {/* 放大 / 缩小 / 重置 / 全屏 */}
               {renderZoomBar()}
               <Legend
@@ -1880,7 +1959,7 @@ export default function AnalyzeScreen() {
                     {renderChart(
                       m,
                       chartW,
-                      Math.round(chartH * chartZoom),
+                      Math.round(chartHBig * chartZoom),
                       series,
                       omissionSeries,
                       theoryMiss,
@@ -1892,6 +1971,9 @@ export default function AnalyzeScreen() {
               ))}
             </View>
           )}
+
+          {/* 数据 / 期数面板：图表看完再往下翻参数（全屏时隐藏） */}
+          {!fullscreen && <Panel label="数 据">{renderDataBar()}</Panel>}
         </ScrollView>
 
         {/* ───── 选号抽屉：从底部上下拉开，内容可上下滑动 ───── */}
@@ -1901,6 +1983,7 @@ export default function AnalyzeScreen() {
             gameName={game.name}
             expanded={pickExpanded}
             onChange={setPickExpanded}
+            bottomOffset={bottomBarH}
           >
             {renderPickContent()}
           </PickSheet>
@@ -1908,7 +1991,10 @@ export default function AnalyzeScreen() {
 
         {/* ───── bottombar 底部操作栏（全屏时隐藏） ───── */}
         {!fullscreen && (
-          <View style={{ paddingBottom: isLandscape ? 0 : insets.bottom }}>
+          <View
+            style={{ paddingBottom: isLandscape ? 0 : insets.bottom }}
+            onLayout={(e) => setBottomBarH(e.nativeEvent.layout.height)}
+          >
             <BottomBar
               primaryLabel="出 图"
               onPrimary={handleExport}
@@ -2002,6 +2088,22 @@ export default function AnalyzeScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      {/* 指标设置：副图 MACD/KDJ/RSI/CCI/ADX/SAR 单选 + MA 均线参数 */}
+      <IndicatorPanel
+        visible={indicatorOpen}
+        onClose={() => setIndicatorOpen(false)}
+        maConfigs={maConfigs}
+        onMaChange={setMaConfigs}
+        sub1={sub1}
+        sub2={sub2}
+        onSubChange={(slot, id) => (slot === 1 ? setSub1(id) : setSub2(id))}
+        onReset={() => {
+          setMaConfigs(DEFAULT_MA);
+          setSub1('macd');
+          setSub2('none');
+        }}
+      />
     </Screen>
   );
 }

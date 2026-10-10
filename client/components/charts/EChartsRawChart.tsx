@@ -145,6 +145,11 @@ export function EChartsRawChart({
     var chart = echarts.init(document.getElementById('chart'));
     chart.setOption(${optionStr});
     window.addEventListener('resize', function() { chart.resize(); });
+    // WebView 的 viewport 不会随布局变化触发 window resize，
+    // 容器尺寸一变图就糊/被裁，所以额外挂一个 ResizeObserver。
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(function () { chart.resize(); }).observe(document.getElementById('chart'));
+    }
   </script>
 </body>
 </html>`;

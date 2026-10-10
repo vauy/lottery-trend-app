@@ -7,6 +7,7 @@ import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ECHARTS_SOURCE } from '@/lib/echartsSource';
 import type { TargetPoint } from '@/lib/lottery/targets';
+import { buildOmissionBars } from './chartMath';
 import { palette, semantic } from '@/lib/theme';
 
 /** 爬楼梯：升档 = 热（red），降档 = 冷（cyan） */
@@ -22,16 +23,10 @@ const TITLE_COLOR = palette.inkDim;
 const BAR_W = 1.5;
 const MAX_SHOW = 300;
 
-type KBar = { x: number; o: number; c: number; isRed: boolean };
-
-function calcDelta(prevMiss: number, theoryMiss: number): { delta: number; isRed: boolean } {
-  if (theoryMiss <= 0) return { delta: 1, isRed: true };
-  if (prevMiss <= theoryMiss) return { delta: 1, isRed: true };
-  const level = Math.ceil(prevMiss / theoryMiss) - 1;
-  const mult = ((level - 1) % 3) + 1;
-  return { delta: -mult, isRed: false };
-}
-
+/**
+ * 爬楼梯实体的构造已提到 chartMath.buildOmissionBars，
+ * 多联图（主图 + 副图指标）要用同一份数值，两处各算一遍必然漂移。
+ */
 export function EChartsOmissionKChart({
   series,
   height = 300,
@@ -46,17 +41,7 @@ export function EChartsOmissionKChart({
   targetLabel?: string;
 }) {
   const html = useMemo(() => {
-    const bars: KBar[] = [];
-    let score = 0;
-    for (let i = 0; i < series.length; i += 1) {
-      if (series[i].hit === 1) {
-        const prevMiss = i === 0 ? 0 : series[i - 1].omission;
-        const { delta, isRed } = calcDelta(prevMiss, theoryMiss);
-        bars.push({ x: i, o: score, c: score + delta, isRed });
-        score = score + delta;
-      }
-    }
-
+    const bars = buildOmissionBars(series, theoryMiss);
     const showBars = bars.length > MAX_SHOW ? bars.slice(-MAX_SHOW) : bars;
     const n = showBars.length;
 
@@ -70,12 +55,8 @@ export function EChartsOmissionKChart({
     const yMax = Math.max(0, ...allY);
     const range = yMax - yMin || 1;
 
-    const xLabels = showBars.map((b) => series[b.x].issue.slice(-3));
-    const dataWithColor = showBars.map((b) => ({
-      value: [b.x - showBars[0].x, b.o, b.c],
-      itemStyle: { color: b.isRed ? UP : DOWN },
-    }));
-    // 修正 x 从 0 开始
+    const xLabels = showBars.map((b) => b.issue.slice(-3));
+    // x 从 0 开始重新编号（只画可见区间）
     const dataFinal = showBars.map((b, i) => ({
       value: [i, b.o, b.c],
       itemStyle: { color: b.isRed ? UP : DOWN },
