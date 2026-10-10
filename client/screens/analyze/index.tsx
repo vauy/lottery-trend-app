@@ -545,11 +545,19 @@ export default function AnalyzeScreen() {
   const scrollRef = useRef<ScrollView>(null);
   /** 同屏网格容器相对滚动内容的 y */
   const gridYRef = useRef(0);
-  /** 每个同屏格相对网格容器的 y（idx → y） */
+  /** 每个同屏格相对网格容器的 y / 高度（idx → y、h） */
   const cellYRef = useRef<Record<number, number>>({});
+  const cellHRef = useRef<Record<number, number>>({});
+  /** 同屏滚动视口高度：state 供渲染（单列「占满」用），ref 供滚动回调即时读取 */
+  const [viewportH, setViewportH] = useState(0);
+  const viewportHRef = useRef(0);
+  const onViewportLayout = (h: number) => {
+    viewportHRef.current = h;
+    setViewportH((prev) => (Math.abs(prev - h) > 1 ? h : prev));
+  };
 
   /**
-   * 点开某格（切成 1 列）后，等布局落定再把该格滚到屏幕顶部。
+   * 点开某格（切成 1 列）后，等布局落定再把该格「居中」滚到屏幕。
    * 双列 → 单列时每格高度都会变，所以延迟一点读最新的 onLayout 结果。
    */
   useEffect(() => {
@@ -558,8 +566,12 @@ export default function AnalyzeScreen() {
     const t = setTimeout(() => {
       if (cancelled) return;
       const y = gridYRef.current + (cellYRef.current[focusedIdx] ?? 0);
-      scrollRef.current?.scrollTo({ y: Math.max(0, y - 6), animated: true });
-    }, 140);
+      const h = cellHRef.current[focusedIdx] ?? 0;
+      const vh = viewportHRef.current;
+      // 居中：该格中线对齐视口中线；上方空间不足时贴顶
+      const target = Math.max(0, y - Math.max(0, (vh - h) / 2));
+      scrollRef.current?.scrollTo({ y: target, animated: true });
+    }, 160);
     return () => {
       cancelled = true;
       clearTimeout(t);
@@ -1028,24 +1040,6 @@ export default function AnalyzeScreen() {
   );
 
   /**
-   * 毒胆同屏布局（对齐参考图：竖屏默认 2 列 × 5 行）。
-   * 点按某格后转「1 列 × 10 行」，仍是全部同屏，只是单列显示并定位到该格。
-   * 单格图表高度按宽度反推：主图 + 副图挤在太矮的格里会糊成一团
-   * （旧值竖屏仅 170dp，主图被压到 ~60dp），这里抬高到 ≥200dp。
-   */
-  const tongColumns = focusedIdx === null ? 2 : 1;
-  const tongGap = 8;
-  const tongW = Math.max(
-    140,
-    Math.floor((contentW - (tongColumns - 1) * tongGap) / tongColumns) - 14,
-  );
-  const tongH = tongColumns === 1
-    ? Math.round(Math.min(400, Math.max(240, tongW * 0.95)))
-    : isLandscape
-      ? Math.round(Math.min(250, Math.max(180, tongW / 1.7)))
-      : Math.round(Math.min(280, Math.max(210, tongW * 1.35)));
-
-  /**
    * 选号已搬进底部抽屉，页面内不再有「选号面板折叠」这回事。
    * 抽屉收起时只占 12% 高度，图表拿走剩下的全部空间。
    */
@@ -1055,6 +1049,41 @@ export default function AnalyzeScreen() {
   // 全屏时只剩顶部一条 34px 的操作条，可用高度接近整屏
   const TOP_BAR_H = fullscreen ? 34 : pickCollapsed ? 44 : 180;
   const availH = Math.max(140, height - TOP_BAR_H);
+
+  /**
+   * 毒胆同屏布局（对齐参考图：竖屏默认 2 列 × 5 行）。
+   * 点按某格后转「1 列 × 10 行」，仍是全部同屏，只是单列显示并定位到该格。
+   * 单格图表高度按宽度反推：主图 + 副图挤在太矮的格里会糊成一团
+   * （旧值竖屏仅 170dp，主图被压到 ~60dp），这里抬高到 ≥200dp。
+   */
+  const tongColumns = focusedIdx === null ? 2 : 1;
+  const tongGap = 8;
+  /** 2 列取半宽（留格间距与内边距）；1 列铺满内容宽（横屏限宽防扁条） */
+  const tongW = Math.max(
+    140,
+    Math.min(
+      tongColumns === 1
+        ? contentW - 10
+        : Math.floor((contentW - tongGap) / 2) - 14,
+      tongColumns === 1 ? 600 : 9999,
+    ),
+  );
+  /**
+   * 单格图表高度。
+   * - 1 列（点开某格）：取滚动视口高 −（头部 + padding），让该格基本「占满」屏幕；
+   * - 2 列：按格宽反推，保证 K 线比例不失真。
+   */
+  const singleViewH = isLandscape ? availH : viewportH || availH;
+  const tongH = tongColumns === 1
+    ? Math.round(
+        Math.min(
+          isLandscape ? 320 : 760,
+          Math.max(240, singleViewH - (isLandscape ? 40 : 58)),
+        ),
+      )
+    : isLandscape
+      ? Math.round(Math.min(250, Math.max(180, tongW / 1.7)))
+      : Math.round(Math.min(280, Math.max(210, tongW * 1.35)));
 
   /** 竖屏紧凑：按钮/页签降一档，把省下的高度让给图表 */
   const dense = !isLandscape;
@@ -2511,8 +2540,16 @@ export default function AnalyzeScreen() {
               return (
                 <View
                   key={idx}
-                  style={[styles.cellBox, tongColumns === 2 && { width: tongW }]}
-                  onLayout={(e) => { cellYRef.current[idx] = e.nativeEvent.layout.y; }}
+                  style={[
+                    styles.cellBox,
+                    { width: tongW },
+                    single && { alignSelf: 'center' },
+                  ]}
+                  onLayout={(e) => {
+                    const { y, height } = e.nativeEvent.layout;
+                    cellYRef.current[idx] = y;
+                    cellHRef.current[idx] = height;
+                  }}
                 >
                   {renderCellHeader(idx, ct, tMiss, oSeries, label)}
                   <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
@@ -2588,6 +2625,7 @@ export default function AnalyzeScreen() {
         {/* ───── content 内容区 ───── */}
         <ScrollView
           ref={scrollRef}
+          onLayout={(e) => onViewportLayout(e.nativeEvent.layout.height)}
           style={styles.content}
           contentContainerStyle={[
             styles.contentInner,
