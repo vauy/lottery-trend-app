@@ -39,7 +39,7 @@ import {
 import { buildRawSeries, buildShapeCodes, getTargetLabel, posIndex, SET_ATTRS, type SetAttrKey, type Kl8Play, type ShapeMainMode, type ShapeFilter } from '@/lib/lottery/targets';
 import { useLotteryHistory, useGame } from '@/hooks/useLottery';
 import { fetchAllAndVerify, verifyLocalData } from '@/lib/lottery/datasource';
-import { buildTargetSeries, getTheoryMiss, getProbability, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
+import { buildTargetSeries, getTheoryMiss, getProbability, windowStats, type Target, type Position, type SamplingMode, type TargetPoint } from '@/lib/lottery/targets';
 import { generateDanTuo } from '@/lib/lottery/danTuo';
 import { buildDigitStats } from '@/lib/lottery/analysis';
 import * as Clipboard from 'expo-clipboard';
@@ -540,6 +540,8 @@ export default function AnalyzeScreen() {
   const [dataTaskRunning, setDataTaskRunning] = useState(false);
   const [dataTaskMsg, setDataTaskMsg] = useState('');
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
+  /** 区间统计弹窗（对齐官方「区间统计」） */
+  const [statsOpen, setStatsOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   /** 同屏滚动容器（点开某格后要滚到它的位置） */
   const scrollRef = useRef<ScrollView>(null);
@@ -829,6 +831,8 @@ export default function AnalyzeScreen() {
   }, [records, tab, ampKey, ampMax]);
 
   const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD, samplingMode), [target, V, DD, samplingMode]);
+  /** 区间统计：当前窗口序列的中出/连开/遗漏/开出率（对齐官方「区间统计」） */
+  const winStats = useMemo(() => windowStats(series, theoryMiss), [series, theoryMiss]);
 
   /**
    * 遗漏和 —— 官方《遗漏和》原文：
@@ -1183,6 +1187,7 @@ export default function AnalyzeScreen() {
       <Chip label="−" active={false} onPress={() => stepZoom(-ZOOM_STEP)} />
       <Text style={styles.zoomText}>{Math.round(chartZoom * 100)}%</Text>
       <Chip label="+" active={false} onPress={() => stepZoom(ZOOM_STEP)} />
+      <Chip label="统计" active={false} onPress={() => setStatsOpen(true)} />
       <Chip label="重置" active={false} onPress={() => setChartZoom(1)} />
       <Chip
         label={fullscreen ? '退出全屏' : '全屏'}
@@ -2952,6 +2957,38 @@ export default function AnalyzeScreen() {
         </Pressable>
       </Modal>
 
+      {/* 区间统计 Modal（对齐官方「区间统计」：中出个数/最大连开/最大遗漏/开出率/理论周期内外） */}
+      <Modal visible={statsOpen} transparent animationType="fade" onRequestClose={() => setStatsOpen(false)}>
+        <Pressable style={styles.modalMask} onPress={() => setStatsOpen(false)}>
+          <View style={[styles.modalCard, { minWidth: 290 }]}>
+            <Text style={styles.modalTitle}>区间统计</Text>
+            <Text style={styles.hint} numberOfLines={2}>
+              {getTargetLabel(target)} · {winStats.firstIssue} ~ {winStats.lastIssue}
+            </Text>
+            <View style={styles.statGrid}>
+              {([
+                ['区间期数', winStats.total],
+                ['中出次数', winStats.hits],
+                ['理论中出', winStats.theoryHits],
+                ['最大连开', winStats.maxRun],
+                ['最大遗漏', winStats.maxOmission],
+                ['当前遗漏', winStats.curOmission],
+                ['开出率', `${(winStats.rate * 100).toFixed(1)}%`],
+                ['理论周期', winStats.theoryMiss.toFixed(2)],
+              ] as [string, string | number][]).map(([k, v]) => (
+                <View key={k} style={styles.statCell}>
+                  <Text style={styles.statVal}>{v}</Text>
+                  <Text style={styles.statKey}>{k}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.hint} numberOfLines={2}>
+              实际中出比理论{winStats.hits >= winStats.theoryHits ? '偏多' : '偏少'} {Math.abs(winStats.hits - winStats.theoryHits).toFixed(1)} 次（{winStats.hits >= winStats.theoryHits ? '走热' : '走冷'}）
+            </Text>
+          </View>
+        </Pressable>
+      </Modal>
+
       {/* ••• 更多菜单：补充图型 / 缩放 / 全屏 / 出图 / 重置 */}
       <Modal visible={moreMenuOpen} transparent animationType="fade" onRequestClose={() => setMoreMenuOpen(false)}>
         <Pressable style={styles.modalMask} onPress={() => setMoreMenuOpen(false)}>
@@ -3042,6 +3079,11 @@ const styles = StyleSheet.create({
   /* ── 胆码同屏格头部（对齐参考图：毒胆·N·直选X注 | 更多 / 图型▾ | MA | 查看号码 / 信息行） ── */
   /** 图型栏固定层：盖过抽屉（zIndex 30 > 抽屉 20），始终贴底可见 */
   chartBarFixed: { zIndex: 30, elevation: 10 },
+  /* ── 区间统计弹窗 ── */
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: space.sm },
+  statCell: { width: '25%', alignItems: 'center', paddingVertical: 8 },
+  statVal: { color: semantic.text, fontSize: fs.md, fontWeight: '700' },
+  statKey: { color: semantic.textDim, fontSize: fs.xs, marginTop: 2 },
   cellBox: {
     position: 'relative',
     borderWidth: 1,

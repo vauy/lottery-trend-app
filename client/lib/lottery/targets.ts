@@ -463,6 +463,66 @@ export function buildTargetSeries(
   return out;
 }
 
+// ==================== 区间统计（对齐官方「区间统计」） ====================
+
+export type WindowStats = {
+  /** 区间期数 */
+  total: number;
+  /** 中出次数 */
+  hits: number;
+  /** 理论中出次数 = 期数 / 理论周期 */
+  theoryHits: number;
+  /** 最大连开 */
+  maxRun: number;
+  /** 最大遗漏 */
+  maxOmission: number;
+  /** 当前遗漏（区间最后一点） */
+  curOmission: number;
+  /** 开出率 */
+  rate: number;
+  /** 理论周期 */
+  theoryMiss: number;
+  /** 区间首期 / 末期期号 */
+  firstIssue: string;
+  lastIssue: string;
+};
+
+/**
+ * 对一段目标序列做区间统计：
+ * 对齐官方「点击右键框定区间 → 区间统计」给出的
+ * 中出个数、最大遗漏、最大连开、开出率、理论周期内外等数据。
+ */
+export function windowStats(series: TargetPoint[], theoryMiss: number): WindowStats {
+  let hits = 0;
+  let maxRun = 0;
+  let run = 0;
+  let maxOmission = 0;
+  for (const p of series) {
+    if (p.hit) {
+      hits += 1;
+      run += 1;
+      if (run > maxRun) maxRun = run;
+    } else {
+      run = 0;
+    }
+    if (p.omission > maxOmission) maxOmission = p.omission;
+  }
+  const total = series.length;
+  const p = theoryMiss > 0 ? 1 / theoryMiss : 0;
+  return {
+    total,
+    hits,
+    theoryHits: Number((total * p).toFixed(1)),
+    maxRun,
+    maxOmission,
+    curOmission: total > 0 ? series[total - 1].omission : 0,
+    rate: total > 0 ? hits / total : 0,
+    theoryMiss,
+    firstIssue: total > 0 ? series[0].issue : '',
+    lastIssue: total > 0 ? series[total - 1].issue : '',
+  };
+}
+
 // ==================== 标签生成 ====================
 
 export function getTargetLabel(target: Target): string {
