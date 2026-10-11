@@ -957,17 +957,25 @@ export default function AnalyzeScreen() {
    * - 遗漏K：`遗漏周期:x.x  当前遗漏:n`
    * - 出次类：`理论出次:x.x  统计周期:N`
    */
-  const chartHeaderMeta = (m: ChartMode): string => {
-    const last = series.length > 0 ? series[series.length - 1] : null;
-    const pct = `${(getProbability(target, V, DD, samplingMode) * 100).toFixed(1)}%`;
+  /**
+   * 图卡信息行（对齐官方口径）。
+   * tMiss/last 必须来自**当前这张图自己的序列**：
+   * 主图传 theoryMiss/series 末点，同屏格传格的 tMiss/格序列末点——
+   * 否则概率与图形不匹配（实测毒胆2 图配出 44.1% 的失真 bug）。
+   * 概率从理论周期反推：p = 1/(1+tMiss)。
+   */
+  const chartHeaderMeta = (m: ChartMode, tMiss: number, last?: TargetPoint): string => {
+    const prob = tMiss > 0 ? 1 / (1 + tMiss) : 0;
+    const pct = `${(prob * 100).toFixed(1)}%`;
+    const om = last?.omission ?? 0;
     if (m === 'freq') {
       return period > 1
-        ? `遗漏:${last?.omission ?? 0}  已出次:${last?.cumHit ?? 0}  当期期号:${last?.issue ?? '—'}  概率:${pct}`
-        : `理论周期:${theoryMiss.toFixed(2)}  遗漏:${last?.omission ?? 0}  概率:${pct}`;
+        ? `遗漏:${om}  已出次:${last?.cumHit ?? 0}  当期期号:${last?.issue ?? '—'}  概率:${pct}`
+        : `理论周期:${tMiss.toFixed(2)}  遗漏:${om}  概率:${pct}`;
     }
-    if (m === 'omissionK') return `遗漏周期:${theoryMiss.toFixed(2)}  当前遗漏:${last?.omission ?? 0}`;
-    if (m === 'omissionLine') return `遗漏周期:${theoryMiss.toFixed(2)}`;
-    if (m === 'chuci' || m === 'chuciMove') return `理论出次:${theoryMiss.toFixed(2)}  统计周期:${stepPeriod}`;
+    if (m === 'omissionK') return `遗漏周期:${tMiss.toFixed(2)}  当前遗漏:${om}`;
+    if (m === 'omissionLine') return `遗漏周期:${tMiss.toFixed(2)}`;
+    if (m === 'chuci' || m === 'chuciMove') return `理论出次:${tMiss.toFixed(2)}  统计周期:${stepPeriod}`;
     return chartMeta[m].meta;
   };
 
@@ -1141,9 +1149,10 @@ export default function AnalyzeScreen() {
   const singleViewH = isLandscape ? availH : viewportH || availH;
   const tongH = tongColumns === 1
     ? Math.round(
+        // 占满视口的同时限制高宽比 ≤1.25，否则 K 线在窄格中被纵向拉伸失真
         Math.min(
           isLandscape ? 320 : 760,
-          Math.max(240, singleViewH - (isLandscape ? 40 : 58)),
+          Math.max(240, Math.min(singleViewH - (isLandscape ? 40 : 58), tongW * 1.25)),
         ),
       )
     : isLandscape
@@ -2216,70 +2225,6 @@ export default function AnalyzeScreen() {
     );
   };
 
-  /** 数据 / 期数面板（原底部工具栏） */
-  const renderDataBar = () => (
-    <>
-      {/* 彩种切换已由顶部 gamebar 提供，这里不再重复放一份 */}
-      {/* 官方《周期K线》：频率K线 + 周期>1 = 周期K线，具备上下影线 */}
-      <Field caption={period > 1 ? '周期K线' : '周期'}>
-        <View style={styles.chipRow}>
-          {[1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20].map((p) => (
-            <Chip key={`pd-${p}`} label={String(p)} active={period === p} pill onPress={() => setPeriod(p)} />
-          ))}
-        </View>
-        {period > 1 && (
-          <>
-            <Text style={styles.hint} numberOfLines={2}>
-              周期值&gt;1 即为周期K线：具备上下影线，线段长度错落不一
-            </Text>
-            <Segmented
-              options={[
-                { value: 'left', label: '左对齐·开奖首期基准' },
-                { value: 'right', label: '右对齐·投注期基准' },
-              ]}
-              value={cycleAlign}
-              onChange={(v) => setCycleAlign(v as CycleAlign)}
-            />
-          </>
-        )}
-      </Field>
-
-      {/* 官方《出次图》：分段周期 + 退期 */}
-      {(chartModes.includes('chuci') || chartModes.includes('chuciMove')) && (
-        <Field caption="分段周期（步长）">
-          <View style={styles.chipRow}>
-            {[5, 10, 15, 20, 25, 30, 50].map((p) => (
-              <Chip key={`sp-${p}`} label={String(p)} active={stepPeriod === p} pill onPress={() => setStepPeriod(p)} />
-            ))}
-          </View>
-          <View style={styles.rowBetween}>
-            <Text style={styles.fieldNote}>退期（最后一点前推的期数）</Text>
-            <Chip label={String(drawBack)} active onPress={() => setDrawBack(drawBack >= 30 ? 0 : drawBack + 5)} />
-          </View>
-          <Text style={styles.hint} numberOfLines={2}>
-            退期用来只对历史数据做验证，看这一段时间内号码已出现的次数
-          </Text>
-        </Field>
-      )}
-
-      {/* 官方《遗漏和》：不定位胆（组选）/ 全胆 / 定位胆（直选） */}
-      {chartModes.includes('missSum') && (
-        <Field caption="遗漏和口径">
-          <Segmented
-            options={[
-              { value: 'direct', label: '定位胆（直选）' },
-              { value: 'group', label: '不定位胆（组选）' },
-              { value: 'all', label: '全胆' },
-            ]}
-            value={missSumKind}
-            onChange={(v) => setMissSumKind(v as 'direct' | 'group' | 'all')}
-          />
-          <MissSumStat values={missSum.values} kind={missSumKind} />
-        </Field>
-      )}
-    </>
-  );
-
   /**
    * 图表渲染：只统一容器，组件 props 与原来一致。
    * 频率K线 / 遗漏K线在有副图指标时改走 MultiPaneChart：
@@ -2371,7 +2316,7 @@ export default function AnalyzeScreen() {
           width={w}
           title={`${chartMeta[m].title} · ${label}`}
           metaLine={[
-            chartHeaderMeta(m),
+            chartHeaderMeta(m, tMiss, s.length > 0 ? s[s.length - 1] : undefined),
             `上轨 ${fmt(tri.upper)} 中轨 ${fmt(tri.mid)} 下轨 ${fmt(tri.lower)}`,
           ].filter(Boolean).join('  ')}
         />
@@ -2780,7 +2725,10 @@ export default function AnalyzeScreen() {
               {chartModes.map((m) => (
                 // 横竖屏都是一列一表，故统一用 100% 宽度，不再按 chartColW 取半宽
                 <View key={m} style={styles.chartCell}>
-                  <ChartCard title={chartMeta[m].title} meta={chartHeaderMeta(m)}>
+                  <ChartCard
+                    title={chartMeta[m].title}
+                    meta={chartHeaderMeta(m, theoryMiss, series.length > 0 ? series[series.length - 1] : undefined)}
+                  >
                     {renderChart(
                       m,
                       chartW,
@@ -2797,8 +2745,7 @@ export default function AnalyzeScreen() {
             </View>
           )}
 
-          {/* 数据 / 期数面板：图表看完再往下翻参数（全屏时隐藏） */}
-          {!fullscreen && <Panel label="数 据">{renderDataBar()}</Panel>}
+          {/* 数据 / 期数面板已移除：期数输入在「周期」弹层，分段周期/遗漏和口径在 ••• 更多菜单 */}
         </ScrollView>
 
         {/* ───── 选号抽屉：从底部上下拉开，内容可上下滑动 ───── */}
@@ -3015,6 +2962,22 @@ export default function AnalyzeScreen() {
               ))}
             </View>
 
+            {/* 周期>1 = 周期K线：对齐基准选择（原「数据」卡片迁入） */}
+            {period > 1 && (
+              <>
+                <View style={styles.modalDivider} />
+                <Text style={styles.fieldNote}>周期K线对齐</Text>
+                <Segmented
+                  options={[
+                    { value: 'left', label: '左对齐·开奖首期基准' },
+                    { value: 'right', label: '右对齐·投注期基准' },
+                  ]}
+                  value={cycleAlign}
+                  onChange={(v) => setCycleAlign(v as CycleAlign)}
+                />
+              </>
+            )}
+
             <View style={styles.modalDivider} />
             <Text style={styles.fieldNote}>期数 / 分析窗口</Text>
             <View style={styles.rowBetween}>
@@ -3093,6 +3056,39 @@ export default function AnalyzeScreen() {
                 />
               ))}
             </View>
+            {/* 出次图：分段周期 + 退期（原「数据」卡片迁入） */}
+            {(chartModes.includes('chuci') || chartModes.includes('chuciMove')) && (
+              <>
+                <View style={styles.modalDivider} />
+                <Text style={styles.fieldNote}>分段周期（步长）</Text>
+                <View style={styles.chipRow}>
+                  {[5, 10, 15, 20, 25, 30, 50].map((p) => (
+                    <Chip key={`sp-${p}`} label={String(p)} active={stepPeriod === p} pill onPress={() => setStepPeriod(p)} />
+                  ))}
+                </View>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.fieldNote}>退期（最后一点前推的期数）</Text>
+                  <Chip label={String(drawBack)} active onPress={() => setDrawBack(drawBack >= 30 ? 0 : drawBack + 5)} />
+                </View>
+              </>
+            )}
+            {/* 遗漏和口径（原「数据」卡片迁入） */}
+            {chartModes.includes('missSum') && (
+              <>
+                <View style={styles.modalDivider} />
+                <Text style={styles.fieldNote}>遗漏和口径</Text>
+                <Segmented
+                  options={[
+                    { value: 'direct', label: '定位胆（直选）' },
+                    { value: 'group', label: '不定位胆（组选）' },
+                    { value: 'all', label: '全胆' },
+                  ]}
+                  value={missSumKind}
+                  onChange={(v) => setMissSumKind(v as 'direct' | 'group' | 'all')}
+                />
+                <MissSumStat values={missSum.values} kind={missSumKind} />
+              </>
+            )}
             <View style={styles.modalDivider} />
             <View style={styles.chipRow}>
               <Chip label="−" active={false} onPress={() => stepZoom(-ZOOM_STEP)} />
