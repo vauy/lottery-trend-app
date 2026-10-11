@@ -22,6 +22,8 @@ export interface LotteryHistoryState {
   source: DataSource;
   error: string | null;
   refresh: () => Promise<void>;
+  /** records 实际对应的彩种——调用方据此判断「彩种已切、数据未到」的中间态 */
+  gameId: string;
 }
 
 export function useLotteryHistory(gameId: string, count: number): LotteryHistoryState {
@@ -31,6 +33,7 @@ export function useLotteryHistory(gameId: string, count: number): LotteryHistory
   const [refreshing, setRefreshing] = useState(false);
   const [source, setSource] = useState<DataSource>('seed');
   const [error, setError] = useState<string | null>(null);
+  const [loadedGameId, setLoadedGameId] = useState(gameId);
 
   const load = useCallback(
     async (isRefresh: boolean) => {
@@ -44,6 +47,7 @@ export function useLotteryHistory(gameId: string, count: number): LotteryHistory
         setRecords(result.records);
         setAllRecords(result.allRecords);
         setSource(result.source);
+        setLoadedGameId(gameId);
       } catch (e) {
         setError(e instanceof Error ? e.message : '加载失败');
       } finally {
@@ -60,7 +64,7 @@ export function useLotteryHistory(gameId: string, count: number): LotteryHistory
 
   const refresh = useCallback(() => load(true), [load]);
 
-  return { records, allRecords, loading, refreshing, source, error, refresh };
+  return { records, allRecords, loading, refreshing, source, error, refresh, gameId: loadedGameId };
 }
 
 export interface LotteryAnalysis {

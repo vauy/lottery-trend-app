@@ -3,7 +3,7 @@
  * 视觉骨架与 prototype/ 1:1：brand / 彩种 / 主导航 / 子页签 / content / bottombar。
  * 所有颜色取自 @/lib/theme，容器与版式取自 @/components/ui/Kit。
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, startTransition } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -413,9 +413,26 @@ export default function AnalyzeScreen() {
   const memKey = `${tab}:${mainMode}`;
   const loadCount = countMap[memKey] ?? countMap[tab] ?? 500;
 
-  const { records, allRecords, loading, refreshing, error, source, refresh } = useLotteryHistory(
+  const {
+    records,
+    allRecords,
+    loading,
+    refreshing,
+    error,
+    source,
+    refresh,
+    gameId: dataGameId,
+  } = useLotteryHistory(
     game.id, loadCount,
   );
+
+  /**
+   * records 是否已与当前彩种匹配。
+   * 切彩种瞬间 V/DD 先变而 records 仍为旧彩种，若不拦截，
+   * missSum/digitMarks/kl8Heat 等全量 memo 会用「新V/D + 旧records」
+   * 爆炸重算两遍（切快乐8 V=80 时直接卡死）——未匹配时全部短路。
+   */
+  const dataReady = dataGameId === gameId;
 
   const didRefresh = useRef(false);
   useEffect(() => {
@@ -940,7 +957,7 @@ export default function AnalyzeScreen() {
   }, [target, V, DD, samplingMode]);
 
   const series = useMemo(() => {
-    if (records.length === 0) return [];
+    if (records.length === 0 || !dataReady) return [];
     const rawLimit = 500 * Math.max(1, period);
     const sliced = records.length > rawLimit ? records.slice(-rawLimit) : records;
     return buildTargetSeries(sliced, target, V, DD, samplingMode);
@@ -984,7 +1001,7 @@ export default function AnalyzeScreen() {
    *   上次出现在第 j 期、本期是第 i 期，则上次遗漏 = i − j − 1（从未出现过则 = i）。
    */
   const missSum = useMemo(() => {
-    if (records.length === 0) {
+    if (records.length === 0 || !dataReady) {
       return { title: '遗漏和', issues: [] as string[], values: [] as number[] };
     }
     const Vv = Math.max(1, V);
@@ -1081,7 +1098,7 @@ export default function AnalyzeScreen() {
 
   // 全历史最大遗漏（用未截断的 allRecords 计算）
   const historyMaxMiss = useMemo(() => {
-    if (allRecords.length === 0) return undefined;
+    if (allRecords.length === 0 || !dataReady) return undefined;
     try {
       const fullSeries = buildTargetSeries(allRecords, target, V, DD);
       let maxMiss = 0;
@@ -1112,7 +1129,7 @@ export default function AnalyzeScreen() {
 
   /** 快乐8 分布图形数据：80 号的出现次数与当前遗漏（近全部已加载期） */
   const kl8Heat = useMemo(() => {
-    if (gameId !== 'kl8' || records.length === 0) return null;
+    if (gameId !== 'kl8' || !dataReady || records.length === 0) return null;
     const N = records.length;
     const counts = new Array<number>(80).fill(0);
     const lastHit = new Array<number>(80).fill(-1);
@@ -1145,7 +1162,7 @@ export default function AnalyzeScreen() {
   /** 数字冷热标记：原型 heatMark()，热号红环 / 冷号青环 */
   const digitMarks = useMemo<Record<number, DigitMark>>(() => {
     const marks: Record<number, DigitMark> = {};
-    if (records.length === 0) return marks;
+    if (records.length === 0 || !dataReady) return marks;
     try {
       const stats = buildDigitStats(records, DIGITS, records.length, DD, V);
       for (const s of stats) {
@@ -3229,7 +3246,8 @@ export default function AnalyzeScreen() {
                 key={g.id}
                 onPress={() => {
                   if (!g.enabled) return;
-                  setGameId(g.id);
+                  setGameMenuOpen(false);
+                  startTransition(() => setGameId(g.id));
                   setGameMenuOpen(false);
                   // 切彩种：清同屏/同屏格状态并收起抽屉，避免旧目标在新彩种下重算卡顿
                   setCompareTargets(null);
