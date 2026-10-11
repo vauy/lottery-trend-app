@@ -547,7 +547,7 @@ export default function AnalyzeScreen() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   /** 同屏下拉面板（对齐官方「选择单个/多个指标」：选码 + 中出 + 交集/并集出图） */
-  const [cmpOpen, setCmpOpen] = useState(true);
+  const [cmpOpen, setCmpOpen] = useState(false);
   const [cmpMulti, setCmpMulti] = useState(false);
   const [cmpSel, setCmpSel] = useState<number[]>([]);
   const [cmpCount, setCmpCount] = useState<'off' | '0' | '1' | '2' | '3' | 'zhong'>('off');
@@ -1378,7 +1378,7 @@ export default function AnalyzeScreen() {
       Array.from({ length: 10 }, (_, d) => ({ kind: 'digit', digit: d, pos: 'any' }) as Target),
     );
     setFocusedIdx(null);
-    setCmpOpen(true);
+    setCmpOpen(false);
     setPickExpanded(false);
   };
 
@@ -2607,32 +2607,32 @@ export default function AnalyzeScreen() {
     return (
       <>
         {!fullscreen && renderZoomBar()}
-        {/* 同屏下拉面板（对齐官方）：单/多指标选码 + 中出 + 交并集出图，可收起 */}
-        <View style={styles.cmpPanel}>
-          <View style={styles.cmpTabs}>
-            <Chip label="选择单个指标" active={!cmpMulti} onPress={() => setCmpMulti(false)} />
-            <Chip label="选择多个指标" active={cmpMulti} onPress={() => setCmpMulti(true)} />
-            <Chip
-              label={cmpOpen ? '收起 ▴' : '展开 ▾'}
-              active={false}
-              onPress={() => setCmpOpen((v) => !v)}
+        {/* 同屏选码面板：默认收起，点把手展开（对齐官方「下拉才出现」） */}
+        <Pressable style={styles.cmpHandle} onPress={() => setCmpOpen((v) => !v)}>
+          <Text style={styles.cmpHandleTxt}>{cmpOpen ? '▴ 收起选码面板' : '▾ 同屏选指标'}</Text>
+        </Pressable>
+        {cmpOpen && (
+          <View style={styles.cmpPanel}>
+            <View style={styles.cmpTabs}>
+              <Chip label="选择单个指标" active={!cmpMulti} onPress={() => setCmpMulti(false)} />
+              <Chip label="选择多个指标" active={cmpMulti} onPress={() => setCmpMulti(true)} />
+              <Chip label="收起 ▴" active={false} onPress={() => setCmpOpen(false)} />
+            </View>
+            <DigitGrid
+              digits={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
+              selected={cmpSel}
+              onToggle={(d) => {
+                if (cmpMulti) {
+                  toggleCmpSel(d);
+                } else {
+                  // 单指标：对齐官方——选码后退出同屏，该码作为毒胆主图满屏显示
+                  setDan([d]);
+                  setCompareTargets(null);
+                  setFocusedIdx(null);
+                  setCmpOpen(false);
+                }
+              }}
             />
-          </View>
-          {cmpOpen && (
-            <>
-              <DigitGrid
-                digits={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
-                selected={cmpSel}
-                onToggle={(d) => {
-                  if (cmpMulti) {
-                    toggleCmpSel(d);
-                  } else {
-                    // 单指标：点码立即出该码单图
-                    setCompareTargets([cmpDigitTarget(d)]);
-                    setFocusedIdx(null);
-                  }
-                }}
-              />
               {cmpMulti && (
                 <>
                   <View style={styles.chipRow}>
@@ -2659,9 +2659,8 @@ export default function AnalyzeScreen() {
                   </View>
                 </>
               )}
-            </>
-          )}
-        </View>
+          </View>
+        )}
         <View onLayout={(e) => { gridYRef.current = e.nativeEvent.layout.y; }}>
           <TongGrid columns={tongColumns}>
             {compareTargets.map((ct, idx) => {
@@ -3280,6 +3279,16 @@ const styles = StyleSheet.create({
     marginBottom: space.sm,
   },
   cmpTabs: { flexDirection: 'row', gap: space.xs, marginBottom: space.xs },
+  cmpHandle: {
+    alignItems: 'center',
+    paddingVertical: 6,
+    marginBottom: space.sm,
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.sm,
+  },
+  cmpHandleTxt: { color: semantic.textDim, fontSize: fs.xs },
   cellBox: {
     position: 'relative',
     borderWidth: 1,
