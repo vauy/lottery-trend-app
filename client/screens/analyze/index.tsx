@@ -885,6 +885,8 @@ export default function AnalyzeScreen() {
     }
     if (tab === 'dan') {
       if (dan.length === 0) return { kind: 'set', codes: new Set() };
+      // 快乐8 等大号池：10^DD 枚举不可行（DD=20 直接卡死），数字型条件仅限 V≤10 游戏
+      if (DD > 10) return { kind: 'set', codes: new Set() };
       // 中出个数模式：覆盖类型（draw/pair/…）语义，按「包含胆码个数 ∈ [start,end]」命中
       if (danCount !== 'all') {
         const [start, end, dedupe] =
@@ -911,12 +913,13 @@ export default function AnalyzeScreen() {
       return { kind: 'set', codes };
     }
     if (tab === 'dantuo') {
-      if (dtDan.length === 0) return { kind: 'set', codes: new Set() };
+      if (dtDan.length === 0 || DD > 10) return { kind: 'set', codes: new Set() };
       const { zhixuan } = generateDanTuo(dtDan, dtTuo, DD);
       return { kind: 'set', codes: new Set(zhixuan) };
     }
     if (tab === 'pos') return { kind: 'digit', digit: posDigit, pos };
     if (tab === 'multi') {
+      if (DD > 10) return { kind: 'set', codes: new Set() };
       if (multiMode === 'pos') {
         if (posSlots.some((s) => s.arr.length === 0)) return { kind: 'set', codes: new Set() };
         // 按位置做笛卡尔积：3 位 → 百十百；5 位 → 万千百十全

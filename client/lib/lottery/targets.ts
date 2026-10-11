@@ -381,6 +381,8 @@ export function getProbability(
       return k / V;
     }
     case 'calcAttr': {
+      // 大号池（快乐8）枚举不可行，退化为定位近似值
+      if (V > 10 || D > 5) return 1 / V;
       const cnt = countCombinations(V, D, (nums) => calcAttrValue(nums, target.calcKey) === target.value);
       return cnt / Math.pow(V, D);
     }
