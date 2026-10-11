@@ -3693,6 +3693,7 @@ export default function AnalyzeScreen() {
                 <Chip label="冷热榜" active={false} onPress={() => { setHotOpen(true); setMoreMenuOpen(false); }} />
               )}
               <Chip label="自定义数据" active={false} onPress={() => { setCustomOpen(true); setMoreMenuOpen(false); }} />
+              <Chip label="官方复刻版" active={false} onPress={() => { setMoreMenuOpen(false); router.push('/replica'); }} />
               <Chip label={`遗漏提醒${remindTh > 0 ? `·${remindTh}` : ''}`} active={remindTh > 0} onPress={() => { setRemindInput(remindTh > 0 ? String(remindTh) : ''); setRemindOpen(true); setMoreMenuOpen(false); }} />
               <Chip label="号码拆分" active={false} onPress={() => { Alert.alert('号码拆分', buildSplitText()); setMoreMenuOpen(false); }} />
             </View>
