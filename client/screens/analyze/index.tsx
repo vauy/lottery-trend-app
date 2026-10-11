@@ -544,6 +544,11 @@ export default function AnalyzeScreen() {
   const [dataTaskRunning, setDataTaskRunning] = useState(false);
   const [dataTaskMsg, setDataTaskMsg] = useState('');
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
+  /** 自定义周期输入（对齐官方 KLineInputPopupWindow 任意周期） */
+  const [periodInput, setPeriodInput] = useState('1');
+  useEffect(() => {
+    if (periodMenuOpen) setPeriodInput(String(period));
+  }, [periodMenuOpen, period]);
   /** 区间统计弹窗（对齐官方「区间统计」） */
   const [statsOpen, setStatsOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
@@ -554,6 +559,71 @@ export default function AnalyzeScreen() {
   const [cmpMulti, setCmpMulti] = useState(false);
   const [cmpSel, setCmpSel] = useState<number[]>([]);
   const [cmpCount, setCmpCount] = useState<'off' | '0' | '1' | '2' | '3' | 'zhong'>('off');
+  /** 同屏排序方向 / 轮播 */
+  const [cmpSortDesc, setCmpSortDesc] = useState(false);
+  const [cmpCycle, setCmpCycle] = useState(false);
+  /** 和值/跨度 出图弹窗：null 关闭 */
+  const [hzkdOpen, setHzkdOpen] = useState<'hezhi' | 'kuadu' | null>(null);
+  const [hzkdA, setHzkdA] = useState('');
+  const [hzkdB, setHzkdB] = useState('');
+  /** 自定义数据（常驻，AsyncStorage）：{name, codes[]} 列表 */
+  const [customList, setCustomList] = useState<{ name: string; codes: string[] }[]>([]);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customCodes, setCustomCodes] = useState('');
+  /** 遗漏提醒阈值（当前遗漏 ≥ 阈值提醒；0=关） */
+  const [remindTh, setRemindTh] = useState(0);
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [remindInput, setRemindInput] = useState('');
+  const remindFiredRef = useRef(false);
+
+  // 自定义数据持久化
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('custom.targets.v1');
+        if (raw) setCustomList(JSON.parse(raw));
+        const rt = await AsyncStorage.getItem('remind.threshold.v1');
+        if (rt) setRemindTh(JSON.parse(rt));
+      } catch {}
+    })();
+  }, []);
+  const saveCustom = (list: { name: string; codes: string[] }[]) => {
+    setCustomList(list);
+    AsyncStorage.setItem('custom.targets.v1', JSON.stringify(list)).catch(() => {});
+  };
+  /** 号码拆分：当前集合按位统计各数字出现注数（对齐官方「号码拆分」） */
+  const buildSplitText = (): string => {
+    if (target.kind !== 'set' || target.codes.size === 0) return '当前条件无号码集合';
+    const per: number[][] = Array.from({ length: DD }, () => new Array(V).fill(0));
+    target.codes.forEach((c) => {
+      for (let i = 0; i < DD && i < c.length; i += 1) {
+        const d = parseInt(c[i], 10);
+        if (!Number.isNaN(d)) per[i][d] += 1;
+      }
+    });
+    return per
+      .map((cnt, i) => `第${i + 1}位: ${cnt.map((n, d) => (n > 0 ? `${d}×${n}` : '')).filter(Boolean).join(' ') || '—'}`)
+      .join('\n');
+  };
+
+  /** 号码串 → 注集合（按当前位数解析） */
+  const parseCodes = (raw: string): Set<string> => {
+    const out = new Set<string>();
+    raw.split(/[\s,，、]+/).forEach((c) => {
+      const t = c.replace(/\D/g, '');
+      if (t.length === DD) out.add(t);
+    });
+    return out;
+  };
+  // 单图轮播：同屏多格时每 3s 切换聚焦格
+  useEffect(() => {
+    if (!cmpCycle || !compareTargets || compareTargets.length < 2) return;
+    const t = setInterval(() => {
+      setFocusedIdx((v) => (v === null ? 0 : (v + 1) % compareTargets.length));
+    }, 3000);
+    return () => clearInterval(t);
+  }, [cmpCycle, compareTargets]);
 
   /** 同屏滚动容器（点开某格后要滚到它的位置） */
   const scrollRef = useRef<ScrollView>(null);
@@ -880,8 +950,25 @@ export default function AnalyzeScreen() {
   }, [records, tab, ampKey, ampMax]);
 
   const theoryMiss = useMemo(() => getTheoryMiss(target, V, DD, samplingMode), [target, V, DD, samplingMode]);
+  // 遗漏提醒检查：当前遗漏达阈值时提醒一次（切目标/调阈值后重新武装）
+  useEffect(() => {
+    remindFiredRef.current = false;
+  }, [target, remindTh]);
+  useEffect(() => {
+    if (remindTh <= 0 || remindFiredRef.current || series.length === 0) return;
+    const cur = series[series.length - 1]?.omission ?? 0;
+    if (cur >= remindTh) {
+      remindFiredRef.current = true;
+      Alert.alert('遗漏提醒', `${getTargetLabel(target)} 当前遗漏 ${cur}，已达阈值 ${remindTh}`);
+    }
+  }, [series, remindTh, target]);
   /** 区间统计：当前窗口序列的中出/连开/遗漏/开出率（对齐官方「区间统计」） */
-  const winStats = useMemo(() => windowStats(series, theoryMiss), [series, theoryMiss]);
+  /** 区间统计窗口：最近 N 期（0=全部） */
+  const [statsWin, setStatsWin] = useState(0);
+  const winStats = useMemo(
+    () => windowStats(statsWin > 0 ? series.slice(-statsWin) : series, theoryMiss),
+    [series, theoryMiss, statsWin],
+  );
 
   /**
    * 遗漏和 —— 官方《遗漏和》原文：
@@ -1413,6 +1500,25 @@ export default function AnalyzeScreen() {
     const s = [...cmpSel].sort((a, b) => a - b);
     setCompareTargets([{ kind: 'countOfDan', dan: s, pei: [], start: s.length, end: s.length, dedupe: true }]);
     setFocusedIdx(null);
+  };
+  /** 排序：按码号升/降重排同屏目标 */
+  const doCmpSort = () => {
+    if (!compareTargets) return;
+    const arr = [...compareTargets].sort(
+      (a, b) => (a.kind === 'digit' ? a.digit : 99) - (b.kind === 'digit' ? b.digit : 99),
+    );
+    if (cmpSortDesc) arr.reverse();
+    setCmpSortDesc((v) => !v);
+    setCompareTargets(arr);
+    setFocusedIdx(null);
+  };
+  /** 随机：随机取一码满屏查看 */
+  const doCmpRandom = () => {
+    const d = Math.floor(Math.random() * 10);
+    setDan([d]);
+    setCompareTargets(null);
+    setFocusedIdx(null);
+    setCmpOpen(false);
   };
   /** 中出档（0/1/2/3/重）：勾选码的个数口径合并出一张图 */
   const doCmpCount = (v: '0' | '1' | '2' | '3' | 'zhong') => {
@@ -2662,6 +2768,11 @@ export default function AnalyzeScreen() {
                     <Chip label="全选出图" active={false} onPress={doCmpAll} />
                     <Chip label="清" active={false} onPress={() => setCmpSel([])} />
                   </View>
+                  <View style={styles.chipRow}>
+                    <Chip label={cmpSortDesc ? '排序·降' : '排序·升'} active={cmpSortDesc} onPress={doCmpSort} />
+                    <Chip label="随机" active={false} onPress={doCmpRandom} />
+                    <Chip label={cmpCycle ? '轮播·开' : '单图⟳'} active={cmpCycle} onPress={() => { setCmpCycle((v) => !v); setFocusedIdx(null); }} />
+                  </View>
                 </>
               )}
           </View>
@@ -2691,7 +2802,20 @@ export default function AnalyzeScreen() {
                   }}
                 >
                   {renderCellHeader(idx, ct, tMiss, oSeries, label)}
-                  <Pressable onPress={() => setFocusedIdx(focusedIdx === idx ? null : idx)}>
+                  <Pressable
+                    onPress={() => {
+                      if (focusedIdx === idx) {
+                        setFocusedIdx(null);
+                        return;
+                      }
+                      // 对齐官方 multitaskInto：点格与末位交换后单列定位到该格
+                      const last = compareTargets.length - 1;
+                      const arr = [...compareTargets];
+                      [arr[last], arr[idx]] = [arr[idx], arr[last]];
+                      setCompareTargets(arr);
+                      setFocusedIdx(last);
+                    }}
+                  >
                     {renderChart(
                       m,
                       tongW,
@@ -3068,7 +3192,7 @@ export default function AnalyzeScreen() {
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((p) => (
                 <Pressable
                   key={p}
-                  onPress={() => setPeriod(p)}
+                  onPress={() => { setPeriod(p); setPeriodInput(String(p)); }}
                   style={[styles.modalGridCell, period === p && styles.modalGridCellOn]}
                 >
                   <Text style={[styles.modalOptionText, period === p && styles.modalOptionTextOn]}>
@@ -3076,6 +3200,28 @@ export default function AnalyzeScreen() {
                   </Text>
                 </Pressable>
               ))}
+            </View>
+            {/* 自定义周期：对齐官方 KLineInputPopupWindow 任意输入 */}
+            <View style={[styles.rowBetween, { marginTop: space.xs }]}>
+              <Text style={styles.fieldNote}>自定义周期</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}>
+                <TextInput
+                  value={periodInput}
+                  onChangeText={setPeriodInput}
+                  keyboardType="numeric"
+                  style={[styles.numInput, { minWidth: 64 }]}
+                  placeholder="如 15"
+                  placeholderTextColor={semantic.textFaint}
+                />
+                <Chip
+                  label="确定"
+                  active
+                  onPress={() => {
+                    const n = parseInt(periodInput, 10);
+                    if (!Number.isNaN(n) && n >= 1 && n <= 500) setPeriod(n);
+                  }}
+                />
+              </View>
             </View>
 
             {/* 周期>1 = 周期K线：对齐基准选择（原「数据」卡片迁入） */}
@@ -3124,11 +3270,155 @@ export default function AnalyzeScreen() {
         </Pressable>
       </Modal>
 
+      {/* 和值 / 跨度 出图（区间输入） */}
+      <Modal visible={hzkdOpen !== null} transparent animationType="fade" onRequestClose={() => setHzkdOpen(null)}>
+        <Pressable style={styles.modalMask} onPress={() => setHzkdOpen(null)}>
+          <View style={[styles.modalCard, { minWidth: 300 }]}>
+            <Text style={styles.modalTitle}>{hzkdOpen === 'hezhi' ? '和值出图' : '跨度出图'}</Text>
+            <View style={[styles.rowBetween, { gap: space.xs }]}>
+              <TextInput
+                value={hzkdA}
+                onChangeText={setHzkdA}
+                keyboardType="numeric"
+                style={[styles.numInput, { flex: 1 }]}
+                placeholder={hzkdOpen === 'hezhi' ? '和值（如 13）' : '跨度最小'}
+                placeholderTextColor={semantic.textFaint}
+              />
+              <Text style={styles.fieldNote}>至</Text>
+              <TextInput
+                value={hzkdB}
+                onChangeText={setHzkdB}
+                keyboardType="numeric"
+                style={[styles.numInput, { flex: 1 }]}
+                placeholder={hzkdOpen === 'hezhi' ? '区间上限可同值' : '跨度最大'}
+                placeholderTextColor={semantic.textFaint}
+              />
+            </View>
+            <View style={styles.chipRow}>
+              <Chip
+                label="出图"
+                active
+                onPress={() => {
+                  const a = parseInt(hzkdA, 10);
+                  const bRaw = parseInt(hzkdB, 10);
+                  if (Number.isNaN(a)) return;
+                  const b = Number.isNaN(bRaw) ? a : bRaw;
+                  const lo = Math.min(a, b);
+                  const hi = Math.max(a, b);
+                  setCompareTargets([
+                    hzkdOpen === 'hezhi' ? { kind: 'hezhi', a: lo, b: hi } : { kind: 'kuadu', a: lo, b: hi },
+                  ]);
+                  setFocusedIdx(null);
+                  setHzkdOpen(null);
+                }}
+              />
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* 自定义数据（对齐官方：粘贴号码组→命名→常驻，点名称出图） */}
+      <Modal visible={customOpen} transparent animationType="fade" onRequestClose={() => setCustomOpen(false)}>
+        <Pressable style={styles.modalMask} onPress={() => setCustomOpen(false)}>
+          <Pressable style={[styles.modalCard, { width: 330 }]}>
+            <Text style={styles.modalTitle}>自定义数据</Text>
+            <View style={[styles.rowBetween, { gap: space.xs }]}>
+              <TextInput
+                value={customName}
+                onChangeText={setCustomName}
+                style={[styles.numInput, { flex: 1 }]}
+                placeholder="名称（如：我的大底）"
+                placeholderTextColor={semantic.textFaint}
+              />
+              <Chip
+                label="保存"
+                active
+                onPress={() => {
+                  const codes = [...parseCodes(customCodes)];
+                  const name = customName.trim();
+                  if (!name || codes.length === 0) return;
+                  saveCustom([...customList.filter((c) => c.name !== name), { name, codes }]);
+                  setCustomName('');
+                  setCustomCodes('');
+                }}
+              />
+            </View>
+            <TextInput
+              value={customCodes}
+              onChangeText={setCustomCodes}
+              multiline
+              style={[styles.numInput, { height: 64, marginTop: space.xs, textAlignVertical: 'top' }]}
+              placeholder={`粘贴 ${DD} 位号码，空格/逗号分隔`}
+              placeholderTextColor={semantic.textFaint}
+            />
+            {customList.length > 0 && (
+              <>
+                <View style={styles.chipRow}>
+                  {customList.map((c) => (
+                    <Chip
+                      key={c.name}
+                      label={`${c.name}(${c.codes.length})`}
+                      active={false}
+                      onPress={() => {
+                        setCompareTargets([{ kind: 'set', codes: new Set(c.codes) }]);
+                        setFocusedIdx(null);
+                        setCustomOpen(false);
+                      }}
+                    />
+                  ))}
+                </View>
+                <Text style={styles.hint} numberOfLines={1}>
+                  点名称即出该组号码的趋势图
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* 遗漏提醒（当前遗漏达阈值提醒一次） */}
+      <Modal visible={remindOpen} transparent animationType="fade" onRequestClose={() => setRemindOpen(false)}>
+        <Pressable style={styles.modalMask} onPress={() => setRemindOpen(false)}>
+          <View style={[styles.modalCard, { minWidth: 270 }]}>
+            <Text style={styles.modalTitle}>遗漏提醒</Text>
+            <Text style={styles.hint} numberOfLines={2}>
+              当前图表的遗漏达到阈值时提醒一次（0 = 关闭）
+            </Text>
+            <View style={[styles.rowBetween, { gap: space.xs }]}>
+              <TextInput
+                value={remindInput}
+                onChangeText={setRemindInput}
+                keyboardType="numeric"
+                style={[styles.numInput, { flex: 1 }]}
+                placeholder="阈值，如 15"
+                placeholderTextColor={semantic.textFaint}
+              />
+              <Chip
+                label="保存"
+                active
+                onPress={() => {
+                  const n = parseInt(remindInput, 10);
+                  const th = Number.isNaN(n) ? 0 : Math.max(0, n);
+                  setRemindTh(th);
+                  AsyncStorage.setItem('remind.threshold.v1', JSON.stringify(th)).catch(() => {});
+                  setRemindOpen(false);
+                }}
+              />
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
       {/* 区间统计 Modal（对齐官方「区间统计」：中出个数/最大连开/最大遗漏/开出率/理论周期内外） */}
       <Modal visible={statsOpen} transparent animationType="fade" onRequestClose={() => setStatsOpen(false)}>
         <Pressable style={styles.modalMask} onPress={() => setStatsOpen(false)}>
           <View style={[styles.modalCard, { minWidth: 290 }]}>
             <Text style={styles.modalTitle}>区间统计</Text>
+            <View style={styles.chipRow}>
+              {([['全部', 0], ['30', 30], ['50', 50], ['100', 100]] as [string, number][]).map(([l, v]) => (
+                <Chip key={v} label={l} active={statsWin === v} onPress={() => setStatsWin(v)} />
+              ))}
+            </View>
             <Text style={styles.hint} numberOfLines={2}>
               {getTargetLabel(target)} · {winStats.firstIssue} ~ {winStats.lastIssue}
             </Text>
@@ -3227,6 +3517,25 @@ export default function AnalyzeScreen() {
                 />
               </>
             )}
+            {/* 形态 / 条件出图（对齐官方：组三组六豹子 / 和值 / 跨度 / 自定义数据 / 提醒 / 拆分） */}
+            <View style={styles.modalDivider} />
+            <Text style={styles.fieldNote}>条件出图</Text>
+            <View style={styles.chipRow}>
+              {(gameId === 'fc3d' || gameId === 'pl3') && (
+                <>
+                  <Chip label="组三" active={compareTargets?.[0]?.kind === 'zu36'} onPress={() => { setCompareTargets([{ kind: 'zu36', shape: 'zu3' }]); setFocusedIdx(null); setMoreMenuOpen(false); }} />
+                  <Chip label="组六" active={false} onPress={() => { setCompareTargets([{ kind: 'zu36', shape: 'zu6' }]); setFocusedIdx(null); setMoreMenuOpen(false); }} />
+                  <Chip label="豹子" active={false} onPress={() => { setCompareTargets([{ kind: 'zu36', shape: 'baozi' }]); setFocusedIdx(null); setMoreMenuOpen(false); }} />
+                </>
+              )}
+              <Chip label="和值" active={false} onPress={() => { setHzkdOpen('hezhi'); setHzkdA('13'); setHzkdB('13'); setMoreMenuOpen(false); }} />
+              <Chip label="跨度" active={false} onPress={() => { setHzkdOpen('kuadu'); setHzkdA('5'); setHzkdB('8'); setMoreMenuOpen(false); }} />
+            </View>
+            <View style={styles.chipRow}>
+              <Chip label="自定义数据" active={false} onPress={() => { setCustomOpen(true); setMoreMenuOpen(false); }} />
+              <Chip label={`遗漏提醒${remindTh > 0 ? `·${remindTh}` : ''}`} active={remindTh > 0} onPress={() => { setRemindInput(remindTh > 0 ? String(remindTh) : ''); setRemindOpen(true); setMoreMenuOpen(false); }} />
+              <Chip label="号码拆分" active={false} onPress={() => { Alert.alert('号码拆分', buildSplitText()); setMoreMenuOpen(false); }} />
+            </View>
             <View style={styles.modalDivider} />
             <View style={styles.chipRow}>
               {/* 组号（原底部 tab 入口移到这里）：按当前彩种跳对应组号/缩水屏 */}

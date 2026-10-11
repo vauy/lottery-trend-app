@@ -179,7 +179,10 @@ export type Target =
    * dedupe=true 表示「重」口径——对子/豹子按 1 个号计算（unique 去重）；
    * dedupe=false 按出现次数计。pei 为配码（任一命中才整条命中，沿用 draw 语义）。
    */
-  | { kind: 'countOfDan'; dan: number[]; pei: number[]; start: number; end: number; dedupe: boolean };
+  | { kind: 'countOfDan'; dan: number[]; pei: number[]; start: number; end: number; dedupe: boolean }
+  | { kind: 'zu36'; shape: 'zu3' | 'zu6' | 'baozi' }
+  | { kind: 'hezhi'; a: number; b: number }
+  | { kind: 'kuadu'; a: number; b: number };
 
 // ==================== 命中判定 ====================
 
@@ -314,6 +317,20 @@ export function isHit(record: DrawRecord, target: Target, prevRecord?: DrawRecor
       const sorted = [...nums].sort((a, b) => a - b).join('');
       return target.codes.has(sorted);
     }
+    case 'zu36': {
+      const s = [...nums].sort((a, b) => a - b);
+      if (target.shape === 'baozi') return s[0] === s[s.length - 1];
+      if (target.shape === 'zu3') return s[0] !== s[s.length - 1] && (s[0] === s[1] || s[1] === s[2]);
+      return s[0] !== s[1] && s[1] !== s[2];
+    }
+    case 'hezhi': {
+      const sum = nums.reduce((x, y) => x + y, 0);
+      return sum >= target.a && sum <= target.b;
+    }
+    case 'kuadu': {
+      const span = Math.max(...nums) - Math.min(...nums);
+      return span >= target.a && span <= target.b;
+    }
   }
 }
 
@@ -435,6 +452,24 @@ export function getProbability(
         else covered += 6;                 // 组六
       }
       return covered / Math.pow(V, D);
+    }
+    case 'zu36': {
+      // 组三/组六/豹子形态：仅 3 位数字型游戏适用
+      if (D !== 3) return 0;
+      const cnt = countCombinations(V, D, (nums) => isHit({ nums } as unknown as DrawRecord, target));
+      return cnt / Math.pow(V, D);
+    }
+    case 'hezhi': {
+      // 和值区间：仅数字型（V≤10）且位数不多时枚举
+      if (V > 10 || D > 5) return 0;
+      const cnt = countCombinations(V, D, (nums) => isHit({ nums } as unknown as DrawRecord, target));
+      return cnt / Math.pow(V, D);
+    }
+    case 'kuadu': {
+      // 跨度区间：同上枚举保护
+      if (V > 10 || D > 5) return 0;
+      const cnt = countCombinations(V, D, (nums) => isHit({ nums } as unknown as DrawRecord, target));
+      return cnt / Math.pow(V, D);
     }
   }
 }
@@ -591,6 +626,12 @@ export function getTargetLabel(target: Target): string {
     case 'shapeSet': {
       return `${target.shapeLabel} · ${target.codes.size} 注`;
     }
+    case 'zu36':
+      return target.shape === 'zu3' ? '组三' : target.shape === 'zu6' ? '组六' : '豹子';
+    case 'hezhi':
+      return target.a === target.b ? `和值 ${target.a}` : `和值 ${target.a}-${target.b}`;
+    case 'kuadu':
+      return target.a === target.b ? `跨度 ${target.a}` : `跨度 ${target.a}-${target.b}`;
   }
 }
 
@@ -620,6 +661,12 @@ export function getTargetShortLabel(target: Target): string {
       return `选${target.playSize}${target.codes.length}复式`;
     case 'shapeSet':
       return `${target.shapeLabel}${target.codes.size}注`;
+    case 'zu36':
+      return target.shape === 'zu3' ? '组三' : target.shape === 'zu6' ? '组六' : '豹子';
+    case 'hezhi':
+      return `和${target.a === target.b ? target.a : `${target.a}-${target.b}`}`;
+    case 'kuadu':
+      return `跨${target.a === target.b ? target.a : `${target.a}-${target.b}`}`;
   }
 }
 

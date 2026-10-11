@@ -11,7 +11,17 @@
  */
 
 /** 指标标识 */
-export type IndicatorId = 'none' | 'macd' | 'kdj' | 'rsi' | 'cci' | 'adx' | 'sar';
+export type IndicatorId =
+  | 'none'
+  | 'macd'
+  | 'kdj'
+  | 'rsi'
+  | 'cci'
+  | 'adx'
+  | 'sar'
+  | 'expma'
+  | 'vma'
+  | 'wr';
 
 /** 计算所需的最小样本量：不足时返回 null，由调用方显示「数据不足」 */
 export type IndicatorResult = {
@@ -80,6 +90,34 @@ export function ema(values: number[], period: number): (number | null)[] {
   for (let i = period; i < values.length; i += 1) {
     prev = values[i] * k + prev * (1 - k);
     out[i] = prev;
+  }
+  return out;
+}
+
+/** 区间最高值 HHV：取最近 period 项的最大值；不足 period 项的为 null */
+function hhv(values: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  if (period <= 0) return out;
+  for (let i = period - 1; i < values.length; i += 1) {
+    let hi = -Infinity;
+    for (let t = i - period + 1; t <= i; t += 1) {
+      if (values[t] > hi) hi = values[t];
+    }
+    out[i] = hi;
+  }
+  return out;
+}
+
+/** 区间最低值 LLV：取最近 period 项的最小值；不足 period 项的为 null */
+function llv(values: number[], period: number): (number | null)[] {
+  const out: (number | null)[] = new Array(values.length).fill(null);
+  if (period <= 0) return out;
+  for (let i = period - 1; i < values.length; i += 1) {
+    let lo = Infinity;
+    for (let t = i - period + 1; t <= i; t += 1) {
+      if (values[t] < lo) lo = values[t];
+    }
+    out[i] = lo;
   }
   return out;
 }
@@ -412,6 +450,93 @@ export function calcSar(
   };
 }
 
+/* ─────────────── EXPMA ─────────────── */
+
+/**
+ * EXPMA（12, 50）：指数平滑移动均线。
+ * 复用本文件的 ema（平滑系数 2/(N+1)，首个有效值取前 N 项 SMA，
+ * 与国内行情软件口径一致）。快线上穿慢线为金叉、下穿为死叉，
+ * 在彩票语义里对应「实出强度相对理论」的加速与衰竭拐点。
+ */
+export function calcExpma(values: number[], fast = 12, slow = 50): IndicatorResult | null {
+  if (values.length < slow) return null;
+  return {
+    series: [
+      { key: 'expma12', label: 'EXPMA12', color: '#f0b429', data: ema(values, fast) },
+      { key: 'expma50', label: 'EXPMA50', color: '#4dabf7', data: ema(values, slow) },
+    ],
+  };
+}
+
+/* ─────────────── VMA ─────────────── */
+
+/**
+ * VMA（5, 10）：振幅均线。
+ * ⚠️ 与官方口径的差异：官方（股票）VMA 是成交量均线，而彩票数据没有
+ * 成交量，这里按「振幅 = |收 − 开| 的移动均值」实现。由于本项目的
+ * highs/lows 由 max(open, close) / min(open, close) 构造，
+ * |收 − 开| 恰等于 high − low；没有 high/low 时退化用相邻期差的绝对值。
+ * 读法与成交量均线一致：VMA 抬升说明波动放大，回落说明趋于平静。
+ */
+export function calcVma(
+  values: number[],
+  highs?: number[],
+  lows?: number[],
+): IndicatorResult | null {
+  const n = values.length;
+  if (n < 10) return null;
+  const H = highs && highs.length === n ? highs : null;
+  const L = lows && lows.length === n ? lows : null;
+  const amp: number[] = values.map((_, i) => {
+    if (H && L) return H[i] - L[i];
+    return i === 0 ? 0 : Math.abs(values[i] - values[i - 1]);
+  });
+  return {
+    series: [
+      { key: 'vma5', label: 'VMA5', color: '#f0b429', data: sma(amp, 5) },
+      { key: 'vma10', label: 'VMA10', color: '#4dabf7', data: sma(amp, 10) },
+    ],
+  };
+}
+
+/* ─────────────── WR ─────────────── */
+
+/**
+ * WR（14）：威廉指标。
+ * WR = (HHV(H,14) − C) / (HHV(H,14) − LLV(L,14)) × 100，范围 0~100。
+ * C 取 values（当期度量值），H/L 由调用方构造。80 以上为超卖区、
+ * 20 以下为超买区（与国内软件纵轴方向一致）；区间完全无波动时取 50。
+ * WR 必须依赖 highs/lows，缺失时返回 null（不像 ADX 有退化口径，
+ * 因为退化后区间恒为 0，WR 只会输出无意义的常数）。
+ */
+export function calcWr(
+  values: number[],
+  period = 14,
+  highs?: number[],
+  lows?: number[],
+): IndicatorResult | null {
+  const n = values.length;
+  if (n < period) return null;
+  if (!highs || !lows || highs.length !== n || lows.length !== n) return null;
+  const hh = hhv(highs, period);
+  const ll = llv(lows, period);
+  const out: (number | null)[] = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i += 1) {
+    const hi = hh[i] as number;
+    const lo = ll[i] as number;
+    const span = hi - lo;
+    out[i] = span === 0 ? 50 : ((hi - values[i]) / span) * 100;
+  }
+  return {
+    series: [{ key: 'wr14', label: `WR${period}`, color: '#f0b429', data: out }],
+    guides: [
+      { value: 80, color: '#484f58', dashed: true },
+      { value: 20, color: '#484f58', dashed: true },
+    ],
+    yRange: { min: 0, max: 100 },
+  };
+}
+
 /* ─────────────── 统一入口 ─────────────── */
 
 /** 各指标的中文说明（设置面板里显示，参考图也是这么写的） */
@@ -455,6 +580,24 @@ export const INDICATOR_META: Record<
     desc:
       '以抛物线的方式跟随数值移动，点在上方表示当前为下行状态，点在下方表示上行状态。每期一个点，转向时是最直观的趋势反转提示。',
   },
+  expma: {
+    label: 'EXPMA',
+    full: '指数平滑移动平均线',
+    desc:
+      '用 12 与 50 两档指数平滑均线刻画数值的长期与短期趋势。快线上穿慢线为金叉，提示短期动能转强；下穿为死叉，提示动能衰竭，交叉点常作为趋势切换的参考。',
+  },
+  vma: {
+    label: 'VMA',
+    full: '振幅均线',
+    desc:
+      '彩票数据没有成交量，故按「振幅（|收−开|）的移动均值」实现。VMA 走高说明近期波动持续放大，走低说明行情趋于平静，可用于识别从沉寂到活跃的切换。',
+  },
+  wr: {
+    label: 'WR',
+    full: '威廉指标',
+    desc:
+      '衡量当期数值在最近 14 期高低区间里的相对位置，取值 0~100。80 以上进入超卖区、20 以下进入超买区（纵轴方向与国内软件一致），触及两端后回落常是回归信号。',
+  },
 };
 
 export const INDICATOR_ORDER: Exclude<IndicatorId, 'none'>[] = [
@@ -464,6 +607,9 @@ export const INDICATOR_ORDER: Exclude<IndicatorId, 'none'>[] = [
   'cci',
   'adx',
   'sar',
+  'expma',
+  'vma',
+  'wr',
 ];
 
 /**
@@ -494,6 +640,13 @@ export function computeIndicator(
       return calcAdx(values, 14, highs, lows);
     case 'sar':
       return calcSar(values);
+    case 'expma':
+      return calcExpma(values);
+    case 'vma':
+      // 振幅 = |收−开|，由调用方构造的 high/low 之差给出（见 calcVma 注释）
+      return calcVma(values, highs, lows);
+    case 'wr':
+      return calcWr(values, 14, highs, lows);
     default:
       return null;
   }
