@@ -809,7 +809,7 @@ export default function AnalyzeScreen() {
   }, [random2A, random2B, random2Mode]);
   const groupCodes = useMemo(() => {
     const set = SET_ATTRS[groupAttr].values[groupValue];
-    if (!set) return [] as string[];
+    if (!set || DD > 10) return [] as string[];
     const idx = groupPos === 'any' ? -1 : posIndex(groupPos, DD);
     const out: string[] = [];
     eachNumber(DD, (nums) => {
@@ -2585,6 +2585,8 @@ export default function AnalyzeScreen() {
   /** digit 目标命中的号码集合（D 位枚举，含该数字 / 定位等于该数字） */
   const cellCodesOf = (ct: Target): string[] => {
     if (ct.kind !== 'digit') return [];
+    // 快乐8 等大号池：命中组合数天文数字，枚举不可行（10^20 直接卡死）
+    if (DD > 10) return [];
     const out: string[] = [];
     eachNumber(DD, (nums) => {
       const hitOk =
@@ -2680,7 +2682,7 @@ export default function AnalyzeScreen() {
       <View>
         <View style={styles.cellHead}>
           <Text style={styles.cellTitle} numberOfLines={1}>
-            {`毒胆 ${label} · 直选${cellCodesOf(ct).length}注`}
+            {DD > 10 ? `毒胆 ${label}` : `毒胆 ${label} · 直选${cellCodesOf(ct).length}注`}
           </Text>
           <Pressable
             style={styles.cellMore}
