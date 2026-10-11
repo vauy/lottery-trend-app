@@ -1851,9 +1851,9 @@ export default function AnalyzeScreen() {
 
   /** 生成"毒胆同屏"目标：每个胆码一张图 */
   const doDanCompare = () => {
-    if (dan.length === 0) return;
-    const sorted = [...dan].sort((a, b) => a - b);
-    const targets: Target[] = sorted.map((d) => ({ kind: 'digit', digit: d, pos: 'any' }));
+    // 对齐官方：毒胆同屏固定 0-9 全部十码（不随所选胆码），逐码对比冷热趋势
+    const targets: Target[] = [];
+    for (let d = 0; d <= 9; d += 1) targets.push({ kind: 'digit', digit: d, pos: 'any' });
     setCompareTargets(targets);
     setPickExpanded(false);
     resetCellUi();
@@ -2242,6 +2242,8 @@ export default function AnalyzeScreen() {
     historyMax?: number,
     /** 水平参考线（同屏格「分割/等分」） */
     overlay: 'none' | 'split' | 'equal' = 'none',
+    /** 副图覆盖：同屏格固定 MACD+KDJ（对齐官方三段式格），不传则用指标面板设置 */
+    subsOverride?: IndicatorId[],
   ) => {
     // 快乐8 分布图形：80 号热力图（与目标序列无关，走游戏级数据）
     if (m === 'kl8dist') {
@@ -2294,7 +2296,8 @@ export default function AnalyzeScreen() {
         />
       );
     }
-    if (activeSubs.length > 0 && (m === 'freq' || m === 'omissionK')) {
+    const subs = subsOverride ?? activeSubs;
+    if (subs.length > 0 && (m === 'freq' || m === 'omissionK')) {
       const bars =
         m === 'freq'
           ? aggregate(s, period, cycleAlign)
@@ -2311,7 +2314,7 @@ export default function AnalyzeScreen() {
           bars={bars}
           maConfigs={bareK ? [] : maConfigs}
           showBoll={!bareK}
-          indicators={activeSubs}
+          indicators={subs}
           height={h}
           width={w}
           title={`${chartMeta[m].title} · ${label}`}
@@ -2460,44 +2463,34 @@ export default function AnalyzeScreen() {
   ) => {
     const cur = cellModes[idx] ?? chartModes[0];
     const modeLabel = CELL_MODES.find((c) => c.id === cur)?.label ?? chartMeta[cur]?.title ?? cur;
-    const lastOmission = oS.length > 0 ? oS[oS.length - 1].omission : 0;
     const prob = getProbability(ct, V, DD);
-    const total = ct.kind === 'digit' && gameId !== 'kl8' ? cellCodesOf(ct).length : codesCount;
     return (
-      <View>
-        {/* 标题行 */}
-        <View style={styles.cellHead}>
+      /* 单行头部（对齐官方：频率K 毒胆 0 27.1% | 号码 | 更多），
+         点标题切图型下拉，把高度全部让给三段式图表 */
+      <View style={styles.cellHead}>
+        <Pressable
+          style={{ flex: 1 }}
+          onPress={() => {
+            setCellMenuIdx(null);
+            setCellDropIdx(cellDropIdx === idx ? null : idx);
+          }}
+        >
           <Text style={styles.cellTitle} numberOfLines={1}>
-            毒胆·{label}·直选{total}注
+            {`${modeLabel} 毒胆 ${label} ${(prob * 100).toFixed(1)}% ▾`}
           </Text>
-          <Pressable
-            style={styles.cellMore}
-            onPress={() => {
-              setCellDropIdx(null);
-              setCellMenuIdx(cellMenuIdx === idx ? null : idx);
-            }}
-          >
-            <Text style={styles.cellMoreText}>更多</Text>
-          </Pressable>
-        </View>
-        {/* 控制行：图型▾ + 遗漏/概率 + 号码。
-            原来的 MA 摘要行与图上均线重复，已并入本行去掉，高度让给图表 */}
-        <View style={styles.cellCtl}>
-          <Pressable
-            onPress={() => {
-              setCellMenuIdx(null);
-              setCellDropIdx(cellDropIdx === idx ? null : idx);
-            }}
-          >
-            <Text style={styles.cellMode}>{modeLabel} ▾</Text>
-          </Pressable>
-          <Text style={styles.cellMa} numberOfLines={1}>
-            {`漏${tMiss.toFixed(2)} 遗${lastOmission} ${(prob * 100).toFixed(1)}%`}
-          </Text>
-          <Pressable onPress={() => openCodesModal(getTargetLabel(ct), ct)}>
-            <Text style={styles.cellView}>号码</Text>
-          </Pressable>
-        </View>
+        </Pressable>
+        <Pressable onPress={() => openCodesModal(getTargetLabel(ct), ct)}>
+          <Text style={styles.cellView}>号码</Text>
+        </Pressable>
+        <Pressable
+          style={styles.cellMore}
+          onPress={() => {
+            setCellDropIdx(null);
+            setCellMenuIdx(cellMenuIdx === idx ? null : idx);
+          }}
+        >
+          <Text style={styles.cellMoreText}>更多</Text>
+        </Pressable>
       </View>
     );
   };
@@ -2601,6 +2594,8 @@ export default function AnalyzeScreen() {
                       getTargetLabel(ct),
                       historyMaxMiss,
                       cellOverlay[idx] ?? 'none',
+                      // 对齐官方三段式格：MACD + KDJ 双副图
+                      ['macd', 'kdj'],
                     )}
                   </Pressable>
                   {renderCellOverlays(idx, ct)}
