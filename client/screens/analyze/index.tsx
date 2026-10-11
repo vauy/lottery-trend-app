@@ -562,6 +562,10 @@ export default function AnalyzeScreen() {
   /** 同屏排序方向 / 轮播 */
   const [cmpSortDesc, setCmpSortDesc] = useState(false);
   const [cmpCycle, setCmpCycle] = useState(false);
+  /** 快乐8 冷热榜（当前遗漏排序 + 遗漏区间筛选，点号码出图） */
+  const [hotOpen, setHotOpen] = useState(false);
+  const [hotMode, setHotMode] = useState<'hot' | 'cold'>('hot');
+  const [hotRange, setHotRange] = useState<'all' | '0-3' | '4-7' | '8+'>('all');
   /** 和值/跨度 出图弹窗：null 关闭 */
   const [hzkdOpen, setHzkdOpen] = useState<'hezhi' | 'kuadu' | null>(null);
   const [hzkdA, setHzkdA] = useState('');
@@ -1121,6 +1125,18 @@ export default function AnalyzeScreen() {
     return { counts, omissions, lastN: N };
   }, [gameId, records]);
 
+  /** 快乐8 冷热榜列表：[{digit, omission, count}]，按模式与区间过滤排序 */
+  const hotList = useMemo(() => {
+    if (!kl8Heat) return [];
+    const rows = kl8Heat.omissions.map((om, i) => ({ digit: i + 1, omission: om, count: kl8Heat.counts[i] }));
+    const inRange = (om: number) =>
+      hotRange === 'all' ? true : hotRange === '0-3' ? om <= 3 : hotRange === '4-7' ? om >= 4 && om <= 7 : om >= 8;
+    return rows
+      .filter((r) => inRange(r.omission))
+      .sort((a, b) => (hotMode === 'hot' ? a.omission - b.omission : b.omission - a.omission))
+      .slice(0, 15);
+  }, [kl8Heat, hotMode, hotRange]);
+
   /** 当前遗漏（原型 .status-pill 用） */
   const currentOmission = omissionSeries.length > 0
     ? omissionSeries[omissionSeries.length - 1].omission
@@ -1248,7 +1264,7 @@ export default function AnalyzeScreen() {
         // 占满视口的同时限制高宽比 ≤1.25，否则 K 线在窄格中被纵向拉伸失真
         Math.min(
           isLandscape ? 320 : 760,
-          Math.max(240, Math.min(singleViewH - (isLandscape ? 40 : 58), tongW * 1.25)),
+          Math.max(240, Math.min(singleViewH - (isLandscape ? 40 : 100), tongW * 1.25)),
         ),
       )
     : isLandscape
@@ -2401,6 +2417,8 @@ export default function AnalyzeScreen() {
     overlay: 'none' | 'split' | 'equal' = 'none',
     /** 副图覆盖：同屏格固定 MACD+KDJ（对齐官方三段式格），不传则用指标面板设置 */
     subsOverride?: IndicatorId[],
+    /** 副图折叠行（官方满屏详情有 × 折叠；同屏格不显示以省高度） */
+    subToggle?: boolean,
   ) => {
     // 快乐8 分布图形：80 号热力图（与目标序列无关，走游戏级数据）
     if (m === 'kl8dist') {
@@ -2472,7 +2490,7 @@ export default function AnalyzeScreen() {
           maConfigs={bareK ? [] : maConfigs}
           showBoll={!bareK}
           indicators={subs}
-          subToggle
+          subToggle={subToggle}
           height={h}
           width={w}
           title={`${chartMeta[m].title} · ${label}`}
@@ -2612,6 +2630,71 @@ export default function AnalyzeScreen() {
    * 标题行「毒胆·N·直选X注 | 更多」、控制行「图型 ▾ | MA摘要 | 查看号码」、信息行「遗漏周期/当前遗漏/概率」。
    * 图型下拉与更多菜单为绝对定位浮层，展开时覆盖在本格图表上方。
    */
+  /**
+   * 满屏详情头（对齐官方 3 行结构）：
+   * 行1 毒胆 N·直选X注 | 更多   行2 图型▾ | 上轨中轨下轨 | 查看号码   行3 理论周期/当前遗漏/概率
+   */
+  const renderFullHeader = (
+    idx: number,
+    ct: Target,
+    tMiss: number,
+    s: TargetPoint[],
+    label: string,
+  ) => {
+    const cur = cellModes[idx] ?? chartModes[0];
+    const modeLabel = CELL_MODES.find((c) => c.id === cur)?.label ?? chartMeta[cur]?.title ?? cur;
+    const prob = getProbability(ct, V, DD);
+    const lastOm = s.length > 0 ? s[s.length - 1].omission : 0;
+    // 上/中/下轨：与 renderChart 相同的聚合与布林公式
+    const bars =
+      cur === 'freq'
+        ? aggregate(s, period, cycleAlign)
+        : cur === 'omissionK'
+          ? buildOmissionBars(s, tMiss, secondOrderFromTheory(tMiss))
+          : null;
+    const cv = bars ? bars.map((b) => b.c) : [];
+    const bl = cv.length >= 2 ? buildBoll(cv, Math.min(20, Math.max(2, cv.length)), 2) : null;
+    const tri = bl ? lastBollTriple(bl) : null;
+    const fmt = (v?: number) => (v === undefined ? '—' : v.toFixed(1));
+    return (
+      <View>
+        <View style={styles.cellHead}>
+          <Text style={styles.cellTitle} numberOfLines={1}>
+            {`毒胆 ${label} · 直选${cellCodesOf(ct).length}注`}
+          </Text>
+          <Pressable
+            style={styles.cellMore}
+            onPress={() => {
+              setCellDropIdx(null);
+              setCellMenuIdx(cellMenuIdx === idx ? null : idx);
+            }}
+          >
+            <Text style={styles.cellMoreText}>更多</Text>
+          </Pressable>
+        </View>
+        <View style={styles.cellCtl}>
+          <Pressable
+            onPress={() => {
+              setCellMenuIdx(null);
+              setCellDropIdx(cellDropIdx === idx ? null : idx);
+            }}
+          >
+            <Text style={styles.cellMode}>{modeLabel} ▾</Text>
+          </Pressable>
+          <Text style={styles.cellMa} numberOfLines={1}>
+            {tri ? `上轨 ${fmt(tri.upper)} 中轨 ${fmt(tri.mid)} 下轨 ${fmt(tri.lower)}` : ''}
+          </Text>
+          <Pressable onPress={() => openCodesModal(getTargetLabel(ct), ct)}>
+            <Text style={styles.cellView}>查看号码</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.cellInfo} numberOfLines={1}>
+          {`理论周期:${tMiss.toFixed(2)} 当前遗漏:${lastOm} 概率:${(prob * 100).toFixed(1)}%`}
+        </Text>
+      </View>
+    );
+  };
+
   const renderCellHeader = (
     idx: number,
     ct: Target,
@@ -2654,13 +2737,13 @@ export default function AnalyzeScreen() {
   };
 
   /** 同屏格浮层：图型下拉 + 更多竖排菜单（必须在图表 WebView 之后渲染才能盖住它） */
-  const renderCellOverlays = (idx: number, ct: Target) => {
+  const renderCellOverlays = (idx: number, ct: Target, full = false) => {
     const cur = cellModes[idx] ?? chartModes[0];
     return (
       <View pointerEvents="box-none">
         {/* 图型下拉浮层 */}
         {cellDropIdx === idx && (
-          <View style={styles.cellDrop}>
+          <View style={[styles.cellDrop, full && styles.cellDropFull]}>
             {CELL_MODES.map((c) => (
               <Pressable
                 key={c.id}
@@ -2677,9 +2760,9 @@ export default function AnalyzeScreen() {
             ))}
           </View>
         )}
-        {/* 更多竖排菜单浮层 */}
+        {/* 更多竖排菜单浮层：贴着「更多」按钮、在格子内部弹出 */}
         {cellMenuIdx === idx && (
-          <View style={styles.cellMenu}>
+          <View style={[styles.cellMenu, full && styles.cellMenuFull]}>
             {CELL_MENU.map((it) => (
               <Pressable
                 key={it.key}
@@ -2715,6 +2798,7 @@ export default function AnalyzeScreen() {
     // 对齐官方 singleK 语义：条目数==1（单码/交集/并集/中出合并图）→ 满屏单图；
     // 多条目 → 分屏网格（竖 2 列），点格进单列定位
     const single = focusedIdx !== null || compareTargets.length === 1;
+    // 单列=一列十行全部渲染；点击的那格撑满视口，上下滑动可见其他格（对齐官方）
     return (
       <>
         {!fullscreen && renderZoomBar()}
@@ -2782,6 +2866,11 @@ export default function AnalyzeScreen() {
             {compareTargets.map((ct, idx) => {
               // 单列时格子大，可多看几期；双列窄格只画 80 期避免糊成一片
               const sliceN = Math.min(records.length, single ? 160 : 80);
+              // 单列模式：点击的那格撑满视口，其余格正常高度（上下滑动可见）
+              const isFull = single && (focusedIdx === null || focusedIdx === idx);
+              const cellH = isFull
+                ? Math.round(Math.max(240, Math.min(singleViewH - (isLandscape ? 40 : 100), tongW * 1.25)))
+                : Math.round(Math.min(320, Math.max(220, tongW * 0.85)));
               const s = buildTargetSeries(records.slice(-sliceN), ct, V, DD);
               const tMiss = getTheoryMiss(ct, V, DD);
               const oSeries = s.map((p) => ({ issue: p.issue, omission: p.omission }));
@@ -2801,7 +2890,9 @@ export default function AnalyzeScreen() {
                     cellHRef.current[idx] = height;
                   }}
                 >
-                  {renderCellHeader(idx, ct, tMiss, oSeries, label)}
+                  {isFull
+                    ? renderFullHeader(idx, ct, tMiss, s, label)
+                    : renderCellHeader(idx, ct, tMiss, oSeries, label)}
                   <Pressable
                     onPress={() => {
                       if (focusedIdx === idx) {
@@ -2819,18 +2910,19 @@ export default function AnalyzeScreen() {
                     {renderChart(
                       m,
                       tongW,
-                      Math.round(tongH * chartZoom),
+                      Math.round(cellH * chartZoom),
                       s,
                       oSeries,
                       tMiss,
                       getTargetLabel(ct),
                       historyMaxMiss,
                       cellOverlay[idx] ?? 'none',
-                      // 对齐官方三段式格：MACD + KDJ 双副图
+                      // 对齐官方三段式格：MACD + KDJ 双副图（同屏格无折叠行）
                       ['macd', 'kdj'],
+                      false,
                     )}
                   </Pressable>
-                  {renderCellOverlays(idx, ct)}
+                  {renderCellOverlays(idx, ct, isFull)}
                 </View>
               );
             })}
@@ -2978,6 +3070,9 @@ export default function AnalyzeScreen() {
                       theoryMiss,
                       getTargetLabel(target),
                       historyMaxMiss,
+                      'none',
+                      undefined,
+                      true,
                     )}
                   </ChartCard>
                 </View>
@@ -3317,6 +3412,45 @@ export default function AnalyzeScreen() {
         </Pressable>
       </Modal>
 
+      {/* 快乐8 冷热榜：最热/最冷 Top15 + 遗漏区间筛选，点号码出趋势图 */}
+      <Modal visible={hotOpen} transparent animationType="fade" onRequestClose={() => setHotOpen(false)}>
+        <Pressable style={styles.modalMask} onPress={() => setHotOpen(false)}>
+          <View style={[styles.modalCard, { width: 330 }]}>
+            <Text style={styles.modalTitle}>冷热榜 · 当前遗漏</Text>
+            <View style={styles.chipRow}>
+              <Chip label="最热" active={hotMode === 'hot'} onPress={() => setHotMode('hot')} />
+              <Chip label="最冷" active={hotMode === 'cold'} onPress={() => setHotMode('cold')} />
+              <Text style={styles.fieldNote}>遗漏区间</Text>
+              {([['全部', 'all'], ['0-3', '0-3'], ['4-7', '4-7'], ['8+', '8+']] as [string, 'all' | '0-3' | '4-7' | '8+'][]).map(([l, v]) => (
+                <Chip key={v} label={l} active={hotRange === v} onPress={() => setHotRange(v)} />
+              ))}
+            </View>
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {hotList.map((r) => (
+                <Pressable
+                  key={r.digit}
+                  style={styles.hotRow}
+                  onPress={() => {
+                    setCompareTargets([{ kind: 'digit', digit: r.digit, pos: 'any' }]);
+                    setFocusedIdx(null);
+                    setHotOpen(false);
+                  }}
+                >
+                  <Text style={styles.hotDigit}>{String(r.digit).padStart(2, '0')}</Text>
+                  <Text style={styles.hotInfo}>
+                    遗漏 {r.omission} 期 · 近{kl8Heat?.lastN ?? 0}期出 {r.count} 次
+                  </Text>
+                  <Text style={styles.hotGo}>出图 ›</Text>
+                </Pressable>
+              ))}
+              {hotList.length === 0 && (
+                <Text style={styles.hint}>该区间暂无号码</Text>
+              )}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
       {/* 自定义数据（对齐官方：粘贴号码组→命名→常驻，点名称出图） */}
       <Modal visible={customOpen} transparent animationType="fade" onRequestClose={() => setCustomOpen(false)}>
         <Pressable style={styles.modalMask} onPress={() => setCustomOpen(false)}>
@@ -3532,6 +3666,9 @@ export default function AnalyzeScreen() {
               <Chip label="跨度" active={false} onPress={() => { setHzkdOpen('kuadu'); setHzkdA('5'); setHzkdB('8'); setMoreMenuOpen(false); }} />
             </View>
             <View style={styles.chipRow}>
+              {gameId === 'kl8' && (
+                <Chip label="冷热榜" active={false} onPress={() => { setHotOpen(true); setMoreMenuOpen(false); }} />
+              )}
               <Chip label="自定义数据" active={false} onPress={() => { setCustomOpen(true); setMoreMenuOpen(false); }} />
               <Chip label={`遗漏提醒${remindTh > 0 ? `·${remindTh}` : ''}`} active={remindTh > 0} onPress={() => { setRemindInput(remindTh > 0 ? String(remindTh) : ''); setRemindOpen(true); setMoreMenuOpen(false); }} />
               <Chip label="号码拆分" active={false} onPress={() => { Alert.alert('号码拆分', buildSplitText()); setMoreMenuOpen(false); }} />
@@ -3616,6 +3753,17 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
   },
   cmpHandleTxt: { color: semantic.textDim, fontSize: fs.xs },
+  hotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: semantic.panelBorder,
+    gap: space.sm,
+  },
+  hotDigit: { color: palette.accent, fontSize: fs.md, fontWeight: '700', minWidth: 36 },
+  hotInfo: { color: semantic.text, fontSize: fs.sm, flex: 1 },
+  hotGo: { color: palette.accent, fontSize: fs.sm },
   cellBox: {
     position: 'relative',
     borderWidth: 1,
@@ -3638,6 +3786,9 @@ const styles = StyleSheet.create({
   cellMode: { color: palette.accent, fontSize: fs.xs, fontWeight: '700' },
   cellMa: { color: palette.amber, fontSize: fs.xs, flex: 1 },
   cellView: { color: semantic.textDim, fontSize: fs.xs },
+  cellInfo: { color: palette.amber, fontSize: fs.xs, marginTop: 2 },
+  cellDropFull: { top: 58 },
+  cellMenuFull: { top: 84 },
   cellDrop: {
     position: 'absolute',
     left: space.xs,
