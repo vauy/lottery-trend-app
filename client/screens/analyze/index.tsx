@@ -9,6 +9,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -548,6 +549,8 @@ export default function AnalyzeScreen() {
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   /** 同屏下拉面板（对齐官方「选择单个/多个指标」：选码 + 中出 + 交集/并集出图） */
   const [cmpOpen, setCmpOpen] = useState(false);
+  /** 同屏下拉刷新：对齐官方 XRecyclerView——下拉唤出选码面板 */
+  const [cmpRefreshing, setCmpRefreshing] = useState(false);
   const [cmpMulti, setCmpMulti] = useState(false);
   const [cmpSel, setCmpSel] = useState<number[]>([]);
   const [cmpCount, setCmpCount] = useState<'off' | '0' | '1' | '2' | '3' | 'zhong'>('off');
@@ -2603,7 +2606,9 @@ export default function AnalyzeScreen() {
    */
   const renderCompare = () => {
     if (!compareTargets || compareTargets.length === 0) return null;
-    const single = focusedIdx !== null;
+    // 对齐官方 singleK 语义：条目数==1（单码/交集/并集/中出合并图）→ 满屏单图；
+    // 多条目 → 分屏网格（竖 2 列），点格进单列定位
+    const single = focusedIdx !== null || compareTargets.length === 1;
     return (
       <>
         {!fullscreen && renderZoomBar()}
@@ -2762,6 +2767,19 @@ export default function AnalyzeScreen() {
         <ScrollView
           ref={scrollRef}
           onLayout={(e) => onViewportLayout(e.nativeEvent.layout.height)}
+          refreshControl={
+            compareTargets ? (
+              <RefreshControl
+                refreshing={cmpRefreshing}
+                onRefresh={() => {
+                  // 对齐官方：同屏状态下拉 → 唤出选码面板
+                  setCmpOpen(true);
+                  setCmpRefreshing(false);
+                }}
+                tintColor={palette.inkFaint}
+              />
+            ) : undefined
+          }
           style={styles.content}
           contentContainerStyle={[
             styles.contentInner,
