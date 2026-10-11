@@ -546,6 +546,12 @@ export default function AnalyzeScreen() {
   /** 区间统计弹窗（对齐官方「区间统计」） */
   const [statsOpen, setStatsOpen] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  /** 同屏下拉面板（对齐官方「选择单个/多个指标」：选码 + 中出 + 交集/并集出图） */
+  const [cmpOpen, setCmpOpen] = useState(true);
+  const [cmpMulti, setCmpMulti] = useState(false);
+  const [cmpSel, setCmpSel] = useState<number[]>([]);
+  const [cmpCount, setCmpCount] = useState<'off' | '0' | '1' | '2' | '3' | 'zhong'>('off');
+
   /** 同屏滚动容器（点开某格后要滚到它的位置） */
   const scrollRef = useRef<ScrollView>(null);
   /** 同屏网格容器相对滚动内容的 y */
@@ -1367,14 +1373,56 @@ export default function AnalyzeScreen() {
       setFocusedIdx(null);
       return;
     }
-    const src = tab === 'dantuo' ? dtDan : dan;
-    if (src.length === 0) {
-      Alert.alert('同屏', '请先在下方抽屉选择胆码（毒胆 / 胆拖），再开同屏');
-      return;
-    }
-    const sorted = [...src].sort((a, b) => a - b);
-    setCompareTargets(sorted.map((d) => ({ kind: 'digit', digit: d, pos: 'any' })));
+    // 对齐官方：点「同屏」默认出 0-9 全部十码；选码/中出/交并集在同屏顶部下拉面板操作
+    setCompareTargets(
+      Array.from({ length: 10 }, (_, d) => ({ kind: 'digit', digit: d, pos: 'any' }) as Target),
+    );
+    setFocusedIdx(null);
+    setCmpOpen(true);
     setPickExpanded(false);
+  };
+
+  // ── 同屏下拉面板（对齐官方「选择单个/多个指标」：选码 + 中出 + 交集/并集出图） ──
+  const cmpDigitTarget = (d: number): Target => ({ kind: 'digit', digit: d, pos: 'any' });
+  const toggleCmpSel = (d: number) =>
+    setCmpSel((v) => (v.includes(d) ? v.filter((x) => x !== d) : [...v, d]));
+  /** 选中出图：勾选的码每码一张 */
+  const doCmpSelected = () => {
+    if (cmpSel.length === 0) return;
+    setCompareTargets([...cmpSel].sort((a, b) => a - b).map(cmpDigitTarget));
+    setFocusedIdx(null);
+  };
+  /** 全选出图：0-9 每码一张 */
+  const doCmpAll = () => {
+    setCompareTargets(Array.from({ length: 10 }, (_, d) => cmpDigitTarget(d)));
+    setFocusedIdx(null);
+  };
+  /** 并集：开奖号含勾选码任一（合并成一张图） */
+  const doCmpUnion = () => {
+    if (cmpSel.length === 0) return;
+    const s = [...cmpSel].sort((a, b) => a - b);
+    setCompareTargets([{ kind: 'countOfDan', dan: s, pei: [], start: 1, end: 9, dedupe: false }]);
+    setFocusedIdx(null);
+  };
+  /** 交集：开奖号同时含勾选码全部（「重」口径去重计） */
+  const doCmpIntersect = () => {
+    if (cmpSel.length === 0) return;
+    const s = [...cmpSel].sort((a, b) => a - b);
+    setCompareTargets([{ kind: 'countOfDan', dan: s, pei: [], start: s.length, end: s.length, dedupe: true }]);
+    setFocusedIdx(null);
+  };
+  /** 中出档（0/1/2/3/重）：勾选码的个数口径合并出一张图 */
+  const doCmpCount = (v: '0' | '1' | '2' | '3' | 'zhong') => {
+    if (cmpSel.length === 0) return;
+    const s = [...cmpSel].sort((a, b) => a - b);
+    const [start, end, dedupe] =
+      v === '0' ? [0, 0, false]
+      : v === '1' ? [1, 1, false]
+      : v === '2' ? [2, 2, false]
+      : v === '3' ? [3, 3, false]
+      : [s.length, s.length, true];
+    setCompareTargets([{ kind: 'countOfDan', dan: s, pei: [], start, end, dedupe }]);
+    setFocusedIdx(null);
   };
 
   const TYPE_OPTIONS = [
@@ -2315,6 +2363,7 @@ export default function AnalyzeScreen() {
           maConfigs={bareK ? [] : maConfigs}
           showBoll={!bareK}
           indicators={subs}
+          subToggle
           height={h}
           width={w}
           title={`${chartMeta[m].title} · ${label}`}
@@ -2558,6 +2607,61 @@ export default function AnalyzeScreen() {
     return (
       <>
         {!fullscreen && renderZoomBar()}
+        {/* 同屏下拉面板（对齐官方）：单/多指标选码 + 中出 + 交并集出图，可收起 */}
+        <View style={styles.cmpPanel}>
+          <View style={styles.cmpTabs}>
+            <Chip label="选择单个指标" active={!cmpMulti} onPress={() => setCmpMulti(false)} />
+            <Chip label="选择多个指标" active={cmpMulti} onPress={() => setCmpMulti(true)} />
+            <Chip
+              label={cmpOpen ? '收起 ▴' : '展开 ▾'}
+              active={false}
+              onPress={() => setCmpOpen((v) => !v)}
+            />
+          </View>
+          {cmpOpen && (
+            <>
+              <DigitGrid
+                digits={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]}
+                selected={cmpSel}
+                onToggle={(d) => {
+                  if (cmpMulti) {
+                    toggleCmpSel(d);
+                  } else {
+                    // 单指标：点码立即出该码单图
+                    setCompareTargets([cmpDigitTarget(d)]);
+                    setFocusedIdx(null);
+                  }
+                }}
+              />
+              {cmpMulti && (
+                <>
+                  <View style={styles.chipRow}>
+                    <Text style={styles.fieldNote}>中出</Text>
+                    {([['0', '0'], ['1', '1'], ['2', '2'], ['3', '3'], ['zhong', '重']] as ['off' | '0' | '1' | '2' | '3' | 'zhong', string][]).map(([v, label]) => (
+                      <Chip
+                        key={v}
+                        label={label}
+                        active={cmpCount === v}
+                        onPress={() => {
+                          const nv = cmpCount === v ? 'off' : v;
+                          setCmpCount(nv);
+                          if (nv !== 'off') doCmpCount(nv as '0' | '1' | '2' | '3' | 'zhong');
+                        }}
+                      />
+                    ))}
+                  </View>
+                  <View style={styles.chipRow}>
+                    <Chip label="交集" active={false} onPress={doCmpIntersect} />
+                    <Chip label="并集" active={false} onPress={doCmpUnion} />
+                    <Chip label="选中出图" active onPress={doCmpSelected} />
+                    <Chip label="全选出图" active={false} onPress={doCmpAll} />
+                    <Chip label="清" active={false} onPress={() => setCmpSel([])} />
+                  </View>
+                </>
+              )}
+            </>
+          )}
+        </View>
         <View onLayout={(e) => { gridYRef.current = e.nativeEvent.layout.y; }}>
           <TongGrid columns={tongColumns}>
             {compareTargets.map((ct, idx) => {
@@ -3166,6 +3270,16 @@ const styles = StyleSheet.create({
   statCell: { width: '25%', alignItems: 'center', paddingVertical: 8 },
   statVal: { color: semantic.text, fontSize: fs.md, fontWeight: '700' },
   statKey: { color: semantic.textDim, fontSize: fs.xs, marginTop: 2 },
+  /* ── 同屏下拉面板（对齐官方） ── */
+  cmpPanel: {
+    backgroundColor: semantic.panelBg,
+    borderWidth: 1,
+    borderColor: semantic.panelBorder,
+    borderRadius: radius.sm,
+    padding: space.xs,
+    marginBottom: space.sm,
+  },
+  cmpTabs: { flexDirection: 'row', gap: space.xs, marginBottom: space.xs },
   cellBox: {
     position: 'relative',
     borderWidth: 1,

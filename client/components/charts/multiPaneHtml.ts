@@ -357,13 +357,24 @@ export function buildMultiPaneHtml({
         });
       }
     }
-    // 左上角指标名：压在副图顶边上（描边加深，避免和网格线糊在一起）
+    // 左上角指标名 + 末值摘要（对齐官方「MACD DIF:x DEA:x」），压在副图顶边上
+    const sumParts = res.series.slice(0, 2).map((s2) => {
+      let lastVal: number | null = null;
+      for (let k = s2.data.length - 1; k >= 0; k -= 1) {
+        const v = s2.data[k];
+        if (v !== null && v !== undefined) {
+          lastVal = v;
+          break;
+        }
+      }
+      return `${s2.label} ${lastVal === null ? '—' : lastVal.toFixed(2)}`;
+    });
     subGraphic.push({
       type: 'text',
       left: 4,
       top: gridTop,
       style: {
-        text: INDICATOR_META[id].label,
+        text: `${INDICATOR_META[id].label}  ${sumParts.join('  ')}`,
         fontSize: 8,
         fill: TITLE,
         stroke: palette.bg,
